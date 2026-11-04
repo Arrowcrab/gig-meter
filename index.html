@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gig Meter</title>
+  <meta name="description" content="Watch your gig pay tick up, cent by cent.">
+  <meta name="theme-color" content="#0a0c0b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gig Meter">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/styles.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main class="meter" id="meter" data-phase="idle">
+    <header class="topbar">
+      <span class="wordmark">Gig Meter</span>
+      <button class="link-btn" id="open-setup" type="button">Setup</button>
+    </header>
+
+    <section class="gig">
+      <h1 class="gig-name" id="gig-name"></h1>
+      <p class="gig-pay" id="gig-pay"></p>
+    </section>
+
+    <section class="display">
+      <p class="status"><span class="dot"></span><span id="status-text">Ready</span></p>
+      <div class="amount" id="amount" role="img" aria-label="$0.00"></div>
+      <p class="elapsed"><span id="elapsed">00:00</span> <span class="elapsed-label">on the clock</span></p>
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <p class="progress-text" id="progress-text"></p>
+      </div>
+      <p class="rate" id="rate"></p>
+    </section>
+
+    <p class="quip" id="quip"></p>
+
+    <footer class="controls">
+      <p class="next" id="next"></p>
+      <div class="buttons">
+        <button class="round secondary" id="reset" type="button">Reset</button>
+        <button class="round primary start" id="primary" type="button">Start</button>
+      </div>
+    </footer>
+  </main>
+
+  <div class="sheet-backdrop" id="setup" hidden>
+    <form class="sheet" id="setup-form" novalidate autocomplete="off">
+      <header class="sheet-head">
+        <button type="button" class="link-btn" id="cancel-setup">Cancel</button>
+        <h2>Gig setup</h2>
+        <span class="sheet-spacer"></span>
+      </header>
+
+      <label class="field">
+        <span class="label">Gig name <em>optional</em></span>
+        <input id="f-name" type="text" maxlength="40" placeholder="Saturday wedding">
+      </label>
+
+      <fieldset class="field">
+        <legend class="label">How are you paid?</legend>
+        <div class="chips" id="f-format"></div>
+      </fieldset>
+
+      <label class="field">
+        <span class="label">Pay</span>
+        <span class="money-input">
+          <span class="prefix">$</span>
+          <input id="f-amount" type="text" inputmode="decimal" placeholder="210">
+          <span class="unit" id="f-unit">per service</span>
+        </span>
+        <span class="hint" id="format-note" hidden></span>
+      </label>
+
+      <fieldset class="field">
+        <legend class="label">Timing</legend>
+        <div class="segmented">
+          <label><input type="radio" name="mode" value="manual" checked><span>I'll tap Start</span></label>
+          <label><input type="radio" name="mode" value="scheduled"><span>Run on a schedule</span></label>
+        </div>
+      </fieldset>
+
+      <div class="field" id="planned-field">
+        <span class="label">How long is the job?</span>
+        <span class="duration">
+          <input id="f-hours" type="number" inputmode="numeric" min="0" max="72" aria-label="Hours"><span>hr</span>
+          <input id="f-minutes" type="number" inputmode="numeric" min="0" max="59" aria-label="Minutes"><span>min</span>
+        </span>
+        <span class="hint">The fee is spread across this much working time.</span>
+      </div>
+
+      <div id="schedule-fields" hidden>
+        <label class="field">
+          <span class="label">Date</span>
+          <input id="f-date" type="date">
+        </label>
+        <div class="row">
+          <label class="field"><span class="label">Starts</span><input id="f-start" type="time"></label>
+          <label class="field"><span class="label">Ends</span><input id="f-end" type="time"></label>
+        </div>
+        <div class="field">
+          <span class="label">Breaks <em>the meter pauses</em></span>
+          <ul class="breaks" id="f-breaks"></ul>
+          <button type="button" class="add-break" id="add-break">+ Add a break</button>
+        </div>
+      </div>
+
+      <footer class="sheet-foot">
+        <p class="summary" id="summary" aria-live="polite"></p>
+        <button type="submit" class="save" id="save">Save</button>
+      </footer>
+    </form>
+  </div>
+
+  <div class="confetti" id="confetti" aria-hidden="true"></div>
+
+  <template id="break-row">
+    <li class="break-row">
+      <input type="time" class="b-start" aria-label="Break start">
+      <input type="number" class="b-min" inputmode="numeric" min="1" max="240" aria-label="Break length in minutes">
+      <span>min</span>
+      <button type="button" class="remove" aria-label="Remove break">&times;</button>
+    </li>
+  </template>
+</body>
+</html>

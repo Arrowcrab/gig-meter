@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0a0c0b"/>
+  <rect x="222" y="46" width="68" height="36" rx="12" fill="#3ee08f"/>
+  <rect x="244" y="76" width="24" height="40" fill="#3ee08f"/>
+  <rect x="380" y="112" width="34" height="22" rx="8" fill="#2b332f" transform="rotate(45 397 123)"/>
+  <circle cx="256" cy="296" r="164" fill="none" stroke="#1d2320" stroke-width="30"/>
+  <circle cx="256" cy="296" r="164" fill="none" stroke="#3ee08f" stroke-width="30" stroke-linecap="round" stroke-dasharray="773 1031" transform="rotate(-90 256 296)"/>
+  <text x="256" y="300" text-anchor="middle" dominant-baseline="central" font-family="SF Pro Rounded, ui-rounded, -apple-system, Helvetica Neue, Arial, sans-serif" font-size="220" font-weight="500" fill="#f1f5f2">$</text>
+</svg>
