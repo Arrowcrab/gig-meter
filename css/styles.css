@@ -115,35 +115,28 @@ button { font: inherit; color: inherit; touch-action: manipulation; cursor: poin
 }
 
 /* The money. Font size is set from script so the number always fits the width. */
+/* Digital readout: "$", dollars and decimals all one size, with fixed-width digits so
+   nothing shifts as they change. */
 .amount {
   display: flex;
-  align-items: flex-end;
+  align-items: baseline;
   justify-content: center;
   font-family: var(--digits);
   font-weight: 300;
-  font-size: 96px;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  font-size: 80px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   color: var(--text);
   transition: color 0.4s, filter 0.4s;
   white-space: nowrap;
 }
 
-/* Glow as a filter on the whole number: a text-shadow would be clipped by each digit's window. */
 [data-phase="running"] .amount { color: #dcffeb; filter: drop-shadow(0 0 16px var(--green-glow)); }
 [data-phase="paid"] .amount { color: var(--gold); filter: drop-shadow(0 0 18px var(--gold-glow)); }
 
-.od-sign { align-self: flex-start; font-size: 0.48em; margin: 0.12em 0.06em 0 0; color: var(--green); }
-[data-phase="paid"] .od-sign { color: var(--gold); }
-.od-dollars, .od-cents { display: flex; align-items: flex-end; }
-.od-cents { font-size: 0.72em; }
-.od-dot, .od-comma { display: inline-block; line-height: 1.05; }
-.od-comma { margin-right: -0.08em; }
-
-.od-digit { display: inline-block; height: 1.05em; overflow: hidden; }
-.od-strip { display: block; transition: transform 320ms cubic-bezier(0.2, 0.8, 0.2, 1); will-change: transform; }
-.od-cell { display: block; height: 1.05em; line-height: 1.05em; text-align: center; }
+.amount .cur { color: var(--green); }
+[data-phase="paid"] .amount .cur { color: inherit; }
 
 .amount.bump { animation: bump 420ms ease-out; }
 @keyframes bump {
@@ -318,6 +311,8 @@ input::-webkit-date-and-time-value { text-align: left; }
 .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface-2); }
 .segmented span { display: block; padding: 10px 8px; border-radius: 9px; text-align: center; font-size: 15px; color: var(--muted); }
 .segmented input:checked + span { background: var(--line); color: var(--text); font-weight: 600; }
+.segmented.four { grid-template-columns: repeat(4, 1fr); }
+.segmented.four span { padding: 10px 2px; font: 15px var(--digits); font-variant-numeric: tabular-nums; }
 
 .duration { display: flex; align-items: center; gap: 8px; }
 .duration input { width: 84px; text-align: center; }
@@ -372,7 +367,7 @@ input::-webkit-date-and-time-value { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .od-strip, .progress-fill, .amount, .quip { transition: none; }
+  .progress-fill, .amount, .quip { transition: none; }
   .amount.bump, [data-phase="running"] .dot, .sheet, .sheet-backdrop { animation: none; }
 }
 

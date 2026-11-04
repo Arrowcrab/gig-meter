@@ -1,16 +1,19 @@
 import {
   FORMATS,
+  DECIMAL_CHOICES,
+  DEFAULT_DECIMALS,
   parseMoney,
   formatMoney,
+  formatAmount,
   formatClock,
   buildSchedule,
   validateConfig,
   newSession,
   getStatus,
+  unitsEarned,
   toggle,
   reset,
 } from './meter.js';
-import { createOdometer } from './odometer.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
 const $ = (id) => document.getElementById(id);
@@ -51,11 +54,11 @@ const QUIPS = {
 
 const meterEl = $('meter');
 const amountEl = $('amount');
+const amountNumEl = $('amount-num');
 const quipEl = $('quip');
 const form = $('setup-form');
-const odometer = createOdometer(amountEl);
 
-const view = { phase: null, cents: -1, second: -1, chars: 0, quipIndex: -1, quipAt: 0 };
+const view = { phase: null, cents: -1, shown: '', dollars: null, second: -1, em: 0, quipIndex: -1, quipAt: 0 };
 const loop = { raf: 0, timer: 0 };
 let resetConfirmUntil = 0;
 let saveConfirmUntil = 0;
@@ -80,6 +83,7 @@ function durationText(ms) {
 }
 
 const centsText = (c) => (c < 100 ? `${Math.round(c)}¢` : formatMoney(Math.round(c)));
+const decimalsOf = (config) => (DECIMAL_CHOICES.includes(config.decimals) ? config.decimals : DEFAULT_DECIMALS);
 
 function rateText(status) {
   const perSecond = status.centsPerHour / 3600;
@@ -110,6 +114,7 @@ function defaultConfig() {
     plannedMinutes: 180,
     mode: 'manual',
     schedule: { date: todayISO(start), start: hhmm(start), end: addToTime(hhmm(start), 180), breaks: [] },
+    decimals: DEFAULT_DECIMALS,
   };
 }
 
@@ -155,25 +160,36 @@ function renderConfig() {
 
 // Size the number so it fits the screen. For flat fees it is sized for the full fee
 // from the start, so the digits don't shrink partway through the gig.
-function fitAmount(status) {
-  const basis = Math.max(status.cents, status.capCents ?? 10000);
-  const dollarChars = formatMoney(basis).length - 4;
-  if (dollarChars === view.chars) return;
-  view.chars = dollarChars;
+function fitAmount(status, decimals) {
+  const basisCents = Math.max(status.cents, status.capCents ?? 10000);
+  const text = formatAmount(basisCents * 10 ** (decimals - 2), decimals);
+  const em = [...text].reduce((sum, ch) => sum + (ch === '.' || ch === ',' ? 0.3 : 0.62), 0);
+  if (em === view.em) return;
+  view.em = em;
   const width = Math.min(meterEl.clientWidth - 40, 520);
-  const em = dollarChars * 0.6 + 0.35 + 2 * 0.72 * 0.6 + 0.48 * 0.6;
-  amountEl.style.fontSize = `${Math.min(120, Math.floor(width / em))}px`;
+  amountEl.style.fontSize = `${Math.min(104, Math.floor(width / em))}px`;
 }
 
-function renderAmount(status) {
-  const grew = status.cents > view.cents;
-  const newDollar = odometer.set(status.cents, grew && !reducedMotion.matches);
+// Digital display: the digits simply change, every frame if they need to, like a
+// stopwatch's hundredths.
+function renderNumber(status, decimals) {
+  const text = formatAmount(unitsEarned(status, decimals), decimals);
+  if (text === view.shown) return;
+  amountNumEl.textContent = text.slice(1); // the "$" is its own element so it can be green
+  view.shown = text;
+}
+
+// Things that only change once per cent: the spoken label, the progress bar, and a
+// small pulse on every new whole dollar.
+function renderCents(status) {
   amountEl.setAttribute('aria-label', formatMoney(status.cents));
-  if (newDollar) {
+  const dollars = Math.floor(status.cents / 100);
+  if (view.dollars != null && dollars > view.dollars && !reducedMotion.matches) {
     amountEl.classList.remove('bump');
     void amountEl.offsetWidth; // restart the animation
     amountEl.classList.add('bump');
   }
+  view.dollars = dollars;
   if (status.capCents != null) {
     $('progress-fill').style.width = `${(status.progress * 100).toFixed(2)}%`;
     setText($('progress-text'), status.phase === 'paid'
@@ -239,8 +255,10 @@ function render(now) {
     syncWakeLock();
   }
 
-  fitAmount(status);
-  if (status.cents !== view.cents) renderAmount(status);
+  const decimals = decimalsOf(session.config);
+  fitAmount(status, decimals);
+  renderNumber(status, decimals);
+  if (status.cents !== view.cents) renderCents(status);
 
   const second = Math.floor(status.workedMs / 1000);
   if (second !== view.second) {
@@ -344,7 +362,7 @@ document.addEventListener('visibilitychange', () => {
   syncWakeLock();
 });
 window.addEventListener('pageshow', kick);
-window.addEventListener('resize', () => { view.chars = 0; kick(); });
+window.addEventListener('resize', () => { view.em = 0; kick(); });
 
 // ---------- setup sheet ----------
 
@@ -389,6 +407,7 @@ function fillForm(config) {
   $('f-end').value = schedule.end;
   const breaks = Array.isArray(schedule.breaks) ? schedule.breaks : [];
   $('f-breaks').replaceChildren(...breaks.map(breakRow));
+  form.elements.decimals.value = String(decimalsOf(config));
 }
 
 function readForm() {
@@ -409,7 +428,29 @@ function readForm() {
         minutes: Number(li.querySelector('.b-min').value),
       })),
     },
+    decimals: Number(form.elements.decimals.value) || DEFAULT_DECIMALS,
   };
+}
+
+// Only changes to pay or timing start a fresh meter; a new name or decimal places
+// keep it running. Fields that don't apply to the chosen setup are ignored.
+function payKey(config) {
+  const flat = FORMATS[config.format]?.kind === 'flat';
+  const scheduled = config.mode === 'scheduled';
+  return JSON.stringify([
+    config.format,
+    config.amountCents,
+    config.mode,
+    !scheduled && flat ? config.plannedMinutes : null,
+    scheduled ? config.schedule : null,
+  ]);
+}
+
+// Saving restarts the meter when pay or timing changed, or to switch a schedule that
+// Reset turned off back on.
+function saveRestarts(config) {
+  const rearm = config.mode === 'scheduled' && !session.scheduleArmed;
+  return !hasSaved || rearm || payKey(config) !== payKey(session.config);
 }
 
 function formError(config, now) {
@@ -445,17 +486,18 @@ function updateForm(showErrors = false) {
     setText(summary, preview.plannedMs ? `${durationText(preview.plannedMs)} of work · ${rate}` : rate);
   }
 
-  setText($('save'), saveLabel(now));
+  setText($('save'), saveLabel(config, now));
 }
 
-// Saving starts a fresh meter, so with money on it Save asks for a second tap.
-function moneyAtRisk(now) {
+// When saving would restart a meter with money on it, Save asks for a second tap.
+function moneyAtRisk(config, now) {
+  if (!saveRestarts(config)) return 0;
   const live = getStatus(session, now);
   return hasSaved && live.cents > 0 && live.phase !== 'paid' ? live.cents : 0;
 }
 
-function saveLabel(now) {
-  const cents = moneyAtRisk(now);
+function saveLabel(config, now) {
+  const cents = moneyAtRisk(config, now);
   if (!cents) return 'Save';
   return now < saveConfirmUntil ? `Tap again to clear ${formatMoney(cents)}` : 'Save & restart meter';
 }
@@ -500,20 +542,23 @@ form.addEventListener('submit', (e) => {
     return;
   }
   const now = Date.now();
-  if (moneyAtRisk(now) && now >= saveConfirmUntil) {
+  if (moneyAtRisk(config, now) && now >= saveConfirmUntil) {
     saveConfirmUntil = now + 4000;
     updateForm();
     setTimeout(() => updateForm(), 4100);
     return;
   }
   saveConfirmUntil = 0;
-  session = newSession(config);
+  if (saveRestarts(config)) {
+    session = newSession(config);
+    Object.assign(view, { phase: null, dollars: null });
+    resetConfirmUntil = 0;
+  } else {
+    session = { ...session, config };
+  }
   persist();
   closeSetup();
-  // Start the display from $0.00 so a session that's already under way rolls up to its amount.
-  odometer.set(0, false);
-  Object.assign(view, { phase: null, cents: -1, second: -1, chars: 0 });
-  resetConfirmUntil = 0;
+  Object.assign(view, { cents: -1, shown: '', second: -1, em: 0 });
   renderConfig();
   kick();
 });

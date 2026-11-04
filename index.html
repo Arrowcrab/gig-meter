@@ -30,7 +30,7 @@
 
     <section class="display">
       <p class="status"><span class="dot"></span><span id="status-text">Ready</span></p>
-      <div class="amount" id="amount" role="img" aria-label="$0.00"></div>
+      <div class="amount" id="amount" role="img" aria-label="$0.00"><span class="cur">$</span><span id="amount-num">0.00</span></div>
       <p class="elapsed"><span id="elapsed">00:00</span> <span class="elapsed-label">on the clock</span></p>
       <div class="progress" id="progress" hidden>
         <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
@@ -110,6 +110,17 @@
           <button type="button" class="add-break" id="add-break">+ Add a break</button>
         </div>
       </div>
+
+      <fieldset class="field">
+        <legend class="label">Decimal places</legend>
+        <div class="segmented four">
+          <label><input type="radio" name="decimals" value="2"><span>1.23</span></label>
+          <label><input type="radio" name="decimals" value="3"><span>1.234</span></label>
+          <label><input type="radio" name="decimals" value="4" checked><span>1.2345</span></label>
+          <label><input type="radio" name="decimals" value="5"><span>1.23456</span></label>
+        </div>
+        <span class="hint">More places means faster-moving digits. Changing this doesn’t restart the meter.</span>
+      </fieldset>
 
       <footer class="sheet-foot">
         <p class="summary" id="summary" aria-live="polite"></p>

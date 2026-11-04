@@ -28,9 +28,25 @@ export function parseMoney(text) {
   return Number.isSafeInteger(cents) ? cents : null;
 }
 
-export function formatMoney(cents) {
-  const dollars = Math.floor(cents / 100).toLocaleString('en-US');
-  return `$${dollars}.${String(cents % 100).padStart(2, '0')}`;
+// How many decimal places the meter can show: cents, or finer for faster-moving digits.
+export const DECIMAL_CHOICES = [2, 3, 4, 5];
+export const DEFAULT_DECIMALS = 4;
+
+// units are whole 10^-decimals dollars: formatAmount(2187, 5) → "$0.02187".
+export function formatAmount(units, decimals = 2) {
+  const scale = 10 ** decimals;
+  const dollars = Math.floor(units / scale).toLocaleString('en-US');
+  return `$${dollars}.${String(units % scale).padStart(decimals, '0')}`;
+}
+
+export const formatMoney = (cents) => formatAmount(cents, 2);
+
+// Earnings at the given precision, rounded down, so 2 places equals status.cents.
+export function unitsEarned(status, decimals = 2) {
+  const { amountCents, perMs } = status.payRate;
+  if (!(perMs > 0)) return 0;
+  const scale = 10n ** BigInt(decimals - 2);
+  return Number((BigInt(amountCents) * scale * BigInt(status.workedMs)) / BigInt(perMs));
 }
 
 // 1:02:03 once past an hour, otherwise 02:03.
@@ -156,7 +172,8 @@ export function getStatus(session, nowInput) {
   const state = runState(timeline, now);
 
   const workedMs = rate.capMs == null ? state.worked : Math.min(state.worked, rate.capMs);
-  const cents = rate.perMs > 0 ? Number((BigInt(rate.amountCents) * BigInt(workedMs)) / BigInt(rate.perMs)) : 0;
+  const earning = { amountCents: rate.amountCents, perMs: rate.perMs };
+  const cents = unitsEarned({ payRate: earning, workedMs }, 2);
   const paid = rate.capMs != null && rate.capMs > 0 && workedMs >= rate.capMs;
 
   let phase;
@@ -183,6 +200,7 @@ export function getStatus(session, nowInput) {
     progress: rate.capMs ? workedMs / rate.capMs : null,
     next: next ? { t: next.t, kind: next.kind } : null,
     centsPerHour: rate.perMs > 0 ? (rate.amountCents * HOUR) / rate.perMs : 0,
+    payRate: earning,
     schedule: armed ? schedule : null,
   };
 }

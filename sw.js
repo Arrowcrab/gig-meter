@@ -6,14 +6,13 @@
 // new files never mix. Bump CACHE whenever any app file changes, or phones keep the
 // old copy.
 
-const CACHE = 'gig-meter-v3';
+const CACHE = 'gig-meter-v5';
 const FILES = [
   './',
   'index.html',
   'css/styles.css',
   'js/app.js',
   'js/meter.js',
-  'js/odometer.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
