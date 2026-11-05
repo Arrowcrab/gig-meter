@@ -21,6 +21,7 @@ import {
   THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong,
   savedTitle, savedSummary, upsertSaved, removeSaved, matchSaved, readSaved,
   historyEntry, addHistory, removeHistory, readHistory, historyTotals, historyRow,
+  wantsInstallHint,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -681,6 +682,26 @@ function twoTapRemove(button, what, onRemove) {
   });
 }
 
+// ---------- Add to Home Screen hint ----------
+
+const INSTALL_KEY = 'gig-meter:install-hint';
+
+function installHintWanted() {
+  let dismissed = false;
+  try { dismissed = localStorage.getItem(INSTALL_KEY) === 'done'; } catch { /* show it */ }
+  return wantsInstallHint({
+    userAgent: navigator.userAgent,
+    maxTouchPoints: navigator.maxTouchPoints,
+    standalone: navigator.standalone === true || matchMedia('(display-mode: standalone)').matches,
+    dismissed,
+  });
+}
+
+$('install-done').addEventListener('click', () => {
+  try { localStorage.setItem(INSTALL_KEY, 'done'); } catch { /* hidden for now only */ }
+  $('install-hint').hidden = true;
+});
+
 // ---------- history sheet ----------
 
 // The current gig shows on top and counts in the totals, but stays out of the stored
@@ -796,6 +817,7 @@ function openSetup({ newGig = false } = {}) {
   fillForm(session.config);
   renderSaved();
   savedHint(SAVED_HINT);
+  $('install-hint').hidden = !installHintWanted();
   $('cancel-setup').style.visibility = hasSaved ? '' : 'hidden'; // keeps the title centered
   $('setup').hidden = false;
   form.scrollTop = 0; // the sheet is reused, so it would otherwise reopen where it was left

@@ -471,6 +471,14 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 .saved-sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .remove.confirm { width: auto; padding: 0 12px; color: var(--danger); font-size: 15px; font-weight: 600; }
 
+/* Add to Home Screen hint: a card at the top of Setup in an iPhone or iPad browser. */
+.install-hint { display: flex; flex-direction: column; gap: 8px; margin: 0 0 22px; padding: 14px 16px 6px; border: 1px solid var(--select); border-radius: var(--radius); background: var(--field); font-size: 15px; line-height: 1.4; }
+.install-hint h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.install-hint p { margin: 0; color: var(--muted); }
+.install-hint ol { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 22px; }
+.install-hint b { font-weight: 600; }
+.install-hint .link-btn { align-self: flex-start; font-weight: 600; }
+
 /* History: opened from the right of Setup's header; three totals, then past gigs. */
 .head-right { justify-self: end; }
 .peek #open-history { visibility: hidden; }

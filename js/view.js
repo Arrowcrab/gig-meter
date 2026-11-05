@@ -315,3 +315,12 @@ export function historyRow(entry, now) {
     amount: formatMoney(entry.cents),
   };
 }
+
+// ---------- Add to Home Screen hint ----------
+// iPhones never offer to install a web app, so Setup explains how, but only in an
+// iPhone or iPad browser (iPadOS calls itself a Mac; the touch screen gives it away),
+// never in the Home Screen app itself, and never again once dismissed.
+export function wantsInstallHint({ userAgent = '', maxTouchPoints = 0, standalone = false, dismissed = false }) {
+  if (standalone || dismissed) return false;
+  return /iPhone|iPad|iPod/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1);
+}
