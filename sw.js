@@ -5,14 +5,21 @@
 // running untouched. Pages are always answered from one version's cache, so old and
 // new files never mix. Bump CACHE whenever any app file changes, or phones keep the
 // old copy.
+//
+// The Fare meter, Pay stub and Poster looks use Google Fonts. Those are saved the
+// first time a look is used online, in a separate cache that app updates leave alone,
+// so the look keeps its fonts offline afterwards.
 
-const CACHE = 'gig-meter-v5';
+const CACHE = 'gig-meter-v6';
+const FONT_CACHE = 'gig-meter-fonts';
+const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const FILES = [
   './',
   'index.html',
   'css/styles.css',
   'js/app.js',
   'js/meter.js',
+  'js/view.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -31,14 +38,33 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== FONT_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
 
+async function fontResponse(request) {
+  const cache = await caches.open(FONT_CACHE);
+  const saved = await cache.match(request);
+  if (saved) return saved;
+  try {
+    const response = await fetch(request);
+    if (response.ok) cache.put(request, response.clone());
+    return response;
+  } catch {
+    return Response.error();
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (FONT_HOSTS.includes(url.hostname)) {
+    event.respondWith(fontResponse(request));
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {

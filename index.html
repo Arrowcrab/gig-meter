@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Gig Meter</title>
   <meta name="description" content="Watch your gig pay tick up, cent by cent.">
-  <meta name="theme-color" content="#0a0c0b">
+  <meta name="theme-color" content="#F2F2F7">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Gig Meter">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -16,37 +16,138 @@
   <link rel="stylesheet" href="css/styles.css">
   <script type="module" src="js/app.js"></script>
 </head>
-<body>
-  <main class="meter" id="meter" data-phase="idle">
-    <header class="topbar">
-      <span class="wordmark">Gig Meter</span>
-      <button class="link-btn" id="open-setup" type="button">Setup</button>
+<body data-theme="quiet" data-phase="idle">
+  <script>
+    // Put the saved look's colors up before the app loads, so it doesn't flash Quiet first.
+    try {
+      const theme = JSON.parse(localStorage.getItem('gig-meter:v1'))?.config?.theme;
+      if (['quiet', 'fare', 'stub', 'poster'].includes(theme)) document.body.dataset.theme = theme;
+    } catch {}
+  </script>
+
+  <!-- Each look is its own layout. One renderer fills every [data-bind] field with the
+       matching text from js/view.js, shows or hides [data-show] parts, and sizes
+       [data-width] bars; only the chosen look is visible. Each look's note slot
+       appears only when there is something functional to say. -->
+
+  <!-- Quiet: native iPhone restraint -->
+  <main class="face quiet" data-face="quiet" hidden>
+    <div class="q-top"><button class="q-link" type="button" data-action="setup">Setup</button></div>
+    <header class="q-head">
+      <h1 class="q-title" data-bind="gigName"></h1>
+      <p class="q-sub" data-bind="gigPay"></p>
     </header>
-
-    <section class="gig">
-      <h1 class="gig-name" id="gig-name"></h1>
-      <p class="gig-pay" id="gig-pay"></p>
+    <section class="q-readout">
+      <div class="amount q-amount" role="img" data-bind="amount"></div>
+      <p class="q-status">
+        <svg class="q-check" aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5 L7.5 13.5 L14.5 5"></path></svg>
+        <span class="q-state" data-bind="status"></span>
+        <span class="q-worked">· <span data-bind="worked"></span> worked</span>
+      </p>
+      <div class="q-bar" data-show="isFlat"><div class="q-fill" data-width="pct"></div></div>
     </section>
-
-    <section class="display">
-      <p class="status"><span class="dot"></span><span id="status-text">Ready</span></p>
-      <div class="amount" id="amount" role="img" aria-label="$0.00"><span class="cur">$</span><span id="amount-num">0.00</span></div>
-      <p class="elapsed"><span id="elapsed">00:00</span> <span class="elapsed-label">on the clock</span></p>
-      <div class="progress" id="progress" hidden>
-        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-        <p class="progress-text" id="progress-text"></p>
-      </div>
-      <p class="rate" id="rate"></p>
+    <section class="q-list">
+      <div class="q-row" data-show="isFlat"><span>Still owed</span><span data-bind="owed"></span></div>
+      <div class="q-row" data-show="hasNext"><span data-bind="nextRowLabel"></span><span data-bind="nextRowValue"></span></div>
+      <div class="q-row"><span>Rate</span><span data-bind="rateLong"></span></div>
     </section>
+    <p class="q-caption" data-show="hasNote" data-bind="note"></p>
+    <div class="spacer"></div>
+    <footer class="q-actions">
+      <button class="q-primary" type="button" data-action="primary" data-bind="primary"></button>
+      <button class="q-reset" type="button" data-action="reset" data-bind="resetLabel"></button>
+    </footer>
+  </main>
 
-    <p class="quip" id="quip"></p>
-
-    <footer class="controls">
-      <p class="next" id="next"></p>
-      <div class="buttons">
-        <button class="round secondary" id="reset" type="button">Reset</button>
-        <button class="round primary start" id="primary" type="button">Start</button>
+  <!-- Fare meter: a taxi meter -->
+  <main class="face fare" data-face="fare" hidden>
+    <div class="f-top">
+      <div class="f-lamp" data-bind="lamp"></div>
+      <button class="f-key f-key-small" type="button" data-action="setup">Setup</button>
+    </div>
+    <header class="f-head">
+      <h1 data-bind="gigName"></h1>
+      <p data-bind="gigPay"></p>
+    </header>
+    <section class="f-window">
+      <div class="f-legend-row"><span class="f-legend">Fare</span><span class="f-rate" data-bind="rateLong"></span></div>
+      <div class="amount f-amount" role="img" data-bind="amount"></div>
+      <div class="f-leds" data-show="isFlat" aria-hidden="true">
+        <span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span>
+        <span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span>
+        <span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span>
+        <span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span><span class="f-led"></span>
       </div>
+      <div class="f-pair">
+        <div><span class="f-legend">Time</span><span class="f-val" data-bind="worked"></span></div>
+        <div class="f-right" data-show="isFlat"><span class="f-legend">Still owed</span><span class="f-val" data-bind="owed"></span></div>
+      </div>
+    </section>
+    <div class="f-ticker" data-show="hasNote" data-bind="note"></div>
+    <div class="f-next" data-show="hasNext"><span class="f-next-label">Next</span><span data-bind="nextText"></span></div>
+    <div class="spacer"></div>
+    <footer class="f-actions">
+      <button class="f-key" type="button" data-action="reset" data-bind="resetLabel"></button>
+      <button class="f-key f-key-primary" type="button" data-action="primary" data-bind="primary"></button>
+    </footer>
+  </main>
+
+  <!-- Pay stub: a printed receipt -->
+  <main class="face stub" data-face="stub" hidden>
+    <div class="s-paper">
+      <header class="s-head">
+        <div class="s-brand">GIG METER</div>
+        <div data-bind="gigName"></div>
+        <div class="s-dim" data-bind="receiptDate"></div>
+      </header>
+      <div class="s-rule"></div>
+      <div class="s-lines">
+        <div class="s-line"><span data-bind="payLabel"></span><i></i><span data-bind="payValue"></span></div>
+        <div class="s-line" data-show="isFlat"><span>Planned work</span><i></i><span data-bind="planned"></span></div>
+        <div class="s-line"><span>Rate</span><i></i><span data-bind="rateLong"></span></div>
+        <div class="s-line"><span>Worked</span><i></i><span data-bind="worked"></span></div>
+      </div>
+      <div class="s-rule"></div>
+      <div class="s-total">
+        <div class="s-total-label" data-bind="totalLabel"></div>
+        <div class="amount s-amount" role="img" data-bind="amount"></div>
+        <div class="s-line" data-show="isFlat"><span>Still owed</span><i></i><span data-bind="owed"></span></div>
+        <div class="s-stamp">PAID IN FULL</div>
+      </div>
+      <div class="s-rule"></div>
+      <ol class="s-log" data-log></ol>
+      <p class="s-dim s-next" data-bind="stubNext"></p>
+      <p class="s-footer" data-show="hasNote">*&nbsp;<span data-bind="note"></span>&nbsp;*</p>
+    </div>
+    <div class="s-edge" aria-hidden="true"></div>
+    <div class="spacer"></div>
+    <footer class="s-actions">
+      <button class="s-btn" type="button" data-action="setup">Setup</button>
+      <button class="s-btn s-btn-reset" type="button" data-action="reset" data-bind="resetLabel"></button>
+      <button class="s-btn s-btn-primary" type="button" data-action="primary" data-bind="primary"></button>
+    </footer>
+  </main>
+
+  <!-- Poster: hi-vis big type -->
+  <main class="face poster" data-face="poster" hidden>
+    <div class="p-top"><span class="p-mark">Gig Meter</span><button class="p-link" type="button" data-action="setup">Setup</button></div>
+    <header class="p-head">
+      <h1 class="p-status" data-bind="status"></h1>
+      <p class="p-sub"><span data-bind="gigName"></span> · <span data-bind="payShort"></span></p>
+    </header>
+    <div class="amount p-amount" role="img" data-bind="amount"></div>
+    <div class="p-bar" data-show="isFlat"><div class="p-fill" data-width="pct"></div></div>
+    <div class="p-grid">
+      <div class="p-cell"><span>Worked</span><b data-bind="worked"></b></div>
+      <div class="p-cell" data-show="isFlat"><span>Still owed</span><b data-bind="owed"></b></div>
+      <div class="p-cell" data-show="hasNext"><span data-bind="nextShortLabel"></span><b data-bind="nextShortValue"></b></div>
+      <div class="p-cell"><span>Rate</span><b data-bind="rateShort"></b></div>
+    </div>
+    <p class="p-caption" data-show="hasNote" data-bind="note"></p>
+    <div class="spacer"></div>
+    <footer class="p-actions">
+      <button class="p-btn" type="button" data-action="reset" data-bind="resetLabel"></button>
+      <button class="p-btn p-btn-primary" type="button" data-action="primary" data-bind="primary"></button>
     </footer>
   </main>
 
@@ -81,7 +182,7 @@
       <fieldset class="field">
         <legend class="label">Timing</legend>
         <div class="segmented">
-          <label><input type="radio" name="mode" value="manual" checked><span>I'll tap Start</span></label>
+          <label><input type="radio" name="mode" value="manual" checked><span>I’ll tap Start</span></label>
           <label><input type="radio" name="mode" value="scheduled"><span>Run on a schedule</span></label>
         </div>
       </fieldset>
@@ -111,6 +212,18 @@
         </div>
       </div>
 
+      <fieldset class="field look-field">
+        <legend class="label">Look</legend>
+        <div class="looks">
+          <label><input type="radio" name="theme" value="quiet" checked><span><i class="swatch sw-quiet"></i>Quiet</span></label>
+          <label><input type="radio" name="theme" value="fare"><span><i class="swatch sw-fare"></i>Fare meter</span></label>
+          <label><input type="radio" name="theme" value="stub"><span><i class="swatch sw-stub"></i>Pay stub</span></label>
+          <label><input type="radio" name="theme" value="poster"><span><i class="swatch sw-poster"></i>Poster</span></label>
+        </div>
+        <span class="hint look-hint">Tap one to preview it. Changing the look doesn’t restart the meter.</span>
+        <button type="button" class="link-btn peek-back" id="all-settings">Show all settings</button>
+      </fieldset>
+
       <fieldset class="field">
         <legend class="label">Decimal places</legend>
         <div class="segmented four">
@@ -128,8 +241,6 @@
       </footer>
     </form>
   </div>
-
-  <div class="confetti" id="confetti" aria-hidden="true"></div>
 
   <template id="break-row">
     <li class="break-row">

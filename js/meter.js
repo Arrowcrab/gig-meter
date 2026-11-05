@@ -158,17 +158,58 @@ function runState(events, now) {
   return { running, worked };
 }
 
-export function getStatus(session, nowInput) {
-  const now = Math.floor(nowInput);
+// Everything getStatus and history share: the usable schedule, the pay rate, and the
+// merged list of scheduled changes and manual taps.
+function prepare(session) {
   const { config } = session;
   const built = config.mode === 'scheduled' ? buildSchedule(config.schedule) : null;
   const schedule = built && !built.error ? built : null;
   const armed = Boolean(session.scheduleArmed && schedule);
   const rate = payRate(config, schedule);
-
   // On a tie, the manual tap comes second (sort is stable), so the user's tap wins.
   const manual = session.events.map((e) => ({ t: e.t, run: e.type === 'resume', kind: 'manual' }));
   const timeline = [...(armed ? scheduleEvents(schedule) : []), ...manual].sort((a, b) => a.t - b.t);
+  return { schedule, armed, rate, timeline };
+}
+
+// What has happened so far, oldest first: every scheduled change or tap that actually
+// started or stopped the meter, then the moment a flat fee was paid in full (after
+// which nothing else matters). Kinds: start, resume, pause, break, back, end, paid.
+export function history(session, nowInput) {
+  const now = Math.floor(nowInput);
+  const { rate, timeline } = prepare(session);
+  const capped = rate.capMs != null && rate.capMs > 0;
+  const entries = [];
+  let running = false;
+  let started = false;
+  let since = 0;
+  let worked = 0;
+
+  const paidBy = (t) => running && capped && worked + (t - since) >= rate.capMs;
+  for (const e of timeline) {
+    if (e.t > now) break;
+    if (paidBy(e.t)) {
+      entries.push({ t: since + (rate.capMs - worked), kind: 'paid' });
+      return entries;
+    }
+    if (running) worked += e.t - since;
+    if (e.run !== running) {
+      let kind;
+      if (e.kind === 'manual' || e.kind === 'start') kind = e.run ? (started ? 'resume' : 'start') : 'pause';
+      else kind = { break: 'break', breakEnd: 'back', end: 'end' }[e.kind];
+      entries.push({ t: e.t, kind });
+      if (e.run) started = true;
+    }
+    running = e.run;
+    since = e.t;
+  }
+  if (paidBy(now)) entries.push({ t: since + (rate.capMs - worked), kind: 'paid' });
+  return entries;
+}
+
+export function getStatus(session, nowInput) {
+  const now = Math.floor(nowInput);
+  const { schedule, armed, rate, timeline } = prepare(session);
   const state = runState(timeline, now);
 
   const workedMs = rate.capMs == null ? state.worked : Math.min(state.worked, rate.capMs);

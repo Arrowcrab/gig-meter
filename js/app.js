@@ -5,84 +5,34 @@ import {
   parseMoney,
   formatMoney,
   formatAmount,
-  formatClock,
   buildSchedule,
   validateConfig,
   newSession,
   getStatus,
-  unitsEarned,
   toggle,
   reset,
 } from './meter.js';
+import { THEMES, DEFAULT_THEME, themeOf, viewModel, UNITS, durationLong } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
 const $ = (id) => document.getElementById(id);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-const UNITS = {
-  hourly: 'per hour', service: 'per service', day: 'per day', flat: 'for the job',
-  minute: 'per minute', weekly: 'per week', yearly: 'per year',
-};
-const STATUS_TEXT = {
-  idle: 'Ready', waiting: 'Scheduled', running: 'Earning', paused: 'Paused',
-  break: 'On break', over: 'Session over', paid: 'Paid in full',
-};
-const NEXT_TEXT = { start: 'Starts at', break: 'Break at', breakEnd: 'Back at', end: 'Ends at' };
-
-const QUIPS = {
-  idle: [() => 'Tap Start and watch the money roll in.', () => 'Ready when you are. The money is always ready.'],
-  waiting: [
-    () => 'The meter starts on its own. Go warm up.',
-    (s) => `Payday begins at ${clockTime(s.schedule.startMs)}.`,
-    () => 'Relax. The money knows when to show up.',
-  ],
-  running: [
-    () => 'Smile. It’s billable.',
-    () => 'You’re not bored. You’re earning.',
-    () => 'Somewhere, a cent just became yours.',
-    (s) => `This is fine. This is ${formatMoney(Math.round(s.centsPerHour))}-an-hour fine.`,
-    (s) => (s.centsPerHour >= 900 ? `That sigh just earned you ${centsText(s.centsPerHour / 900)}.` : null),
-    () => 'Look busy. The meter is.',
-    () => 'Not fun? Still pays.',
-    () => 'A very slow slot machine that always pays out.',
-  ],
-  break: [() => 'The meter’s on break too.', () => 'Snack responsibly. The money resumes shortly.'],
-  paused: [() => 'Paused. The money will wait for you.', () => 'Tap Resume when you’re ready to get paid again.'],
-  over: [() => 'That’s a wrap. You’re off the clock.', () => 'Session over. Go home.'],
-  paid: [() => 'Paid in full. You may stop smiling now.', () => 'Every last cent. You survived.'],
-};
-
-const meterEl = $('meter');
-const amountEl = $('amount');
-const amountNumEl = $('amount-num');
-const quipEl = $('quip');
 const form = $('setup-form');
+const faces = Object.fromEntries([...document.querySelectorAll('[data-face]')].map((el) => [el.dataset.face, el]));
 
-const view = { phase: null, cents: -1, shown: '', dollars: null, second: -1, em: 0, quipIndex: -1, quipAt: 0 };
+const view = { theme: null, parts: null, phase: null, cents: -1, dollars: null, fitKey: '', logKey: '', led: -1 };
 const loop = { raf: 0, timer: 0 };
 let resetConfirmUntil = 0;
 let saveConfirmUntil = 0;
 let reloadWhenSetupCloses = false;
+let rolledDate = null; // { saved, shown } when Setup moved an ended session's date forward
+let newGigSetup = false; // Setup was opened from "New gig", so Save always starts fresh
 
 // ---------- small helpers ----------
 
 const pad = (n) => String(n).padStart(2, '0');
 const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
-const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
-function clockLabel(ms, now) {
-  const sameDay = new Date(ms).toDateString() === new Date(now).toDateString();
-  return sameDay ? clockTime(ms) : new Date(ms).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-}
-
-function durationText(ms) {
-  const mins = Math.round(ms / 60000);
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`;
-}
-
-const centsText = (c) => (c < 100 ? `${Math.round(c)}¢` : formatMoney(Math.round(c)));
 const decimalsOf = (config) => (DECIMAL_CHOICES.includes(config.decimals) ? config.decimals : DEFAULT_DECIMALS);
 
 function rateText(status) {
@@ -115,6 +65,7 @@ function defaultConfig() {
     mode: 'manual',
     schedule: { date: todayISO(start), start: hhmm(start), end: addToTime(hhmm(start), 180), breaks: [] },
     decimals: DEFAULT_DECIMALS,
+    theme: DEFAULT_THEME,
   };
 }
 
@@ -145,130 +96,150 @@ let session = load();
 if (session) hasSaved = true;
 else session = newSession(defaultConfig()); // shown behind the first-run setup, not saved
 
+// ---------- looks ----------
+
+const fontLinks = {};
+
+// Each look's web fonts are requested only once that look is used; the offline copy
+// keeps them after the first time.
+function loadFonts(theme) {
+  const families = THEMES[theme].fonts;
+  if (!families || fontLinks[theme]) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.crossOrigin = 'anonymous'; // lets the offline copy see whether the request worked
+  link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
+  document.head.append(link);
+  fontLinks[theme] = link;
+}
+
+// The phone's top-bar color follows the page, including the Poster's phase colors.
+function syncTopBar() {
+  const bg = getComputedStyle(document.body).getPropertyValue('--bg').trim();
+  document.querySelector('meta[name="theme-color"]').content = bg || THEMES[view.theme].color;
+}
+
+function applyTheme(theme) {
+  if (theme === view.theme) return;
+  const face = faces[theme];
+  for (const [name, el] of Object.entries(faces)) el.hidden = name !== theme;
+  document.body.dataset.theme = theme;
+  loadFonts(theme);
+  view.theme = theme;
+  view.parts = {
+    binds: [...face.querySelectorAll('[data-bind]')],
+    shows: [...face.querySelectorAll('[data-show]')],
+    widths: [...face.querySelectorAll('[data-width]')],
+    amount: face.querySelector('.amount'),
+    log: face.querySelector('[data-log]'),
+    leds: [...face.querySelectorAll('.f-led')],
+    resets: [...face.querySelectorAll('[data-action="reset"]')],
+  };
+  Object.assign(view, { cents: -1, fitKey: '', logKey: '', logClock: null, led: -1 });
+  syncTopBar();
+}
+
 // ---------- meter rendering ----------
 
-function renderConfig() {
-  const { config } = session;
-  const status = getStatus(session, Date.now());
-  setText($('gig-name'), config.name || 'Your gig');
-  let pay = `${formatMoney(config.amountCents)} ${UNITS[config.format]}`;
-  if (status.plannedMs) pay += ` · ${durationText(status.plannedMs)} of work`;
-  setText($('gig-pay'), pay);
-  setText($('rate'), rateText(status));
-  $('progress').hidden = status.capCents == null;
+// Fill the visible look: every [data-bind] gets its text, [data-show] parts appear or
+// hide, [data-width] bars take their width.
+function applyView(vm) {
+  const { binds, shows, widths, leds } = view.parts;
+  for (const el of binds) setText(el, String(vm[el.dataset.bind] ?? ''));
+  for (const el of shows) el.hidden = !vm[el.dataset.show];
+  for (const el of widths) if (el.style.width !== vm[el.dataset.width]) el.style.width = vm[el.dataset.width];
+  if (leds.length && vm.ledLit !== view.led) {
+    leds.forEach((el, i) => el.classList.toggle('lit', i < vm.ledLit));
+    view.led = vm.ledLit;
+  }
 }
 
-// Size the number so it fits the screen. For flat fees it is sized for the full fee
-// from the start, so the digits don't shrink partway through the gig.
+// Size the number so the widest it will get still fits its space. Flat fees are sized
+// for the full fee from the start, so the digits don't shrink partway through.
+const probe = Object.assign(document.createElement('span'), { ariaHidden: 'true' });
+probe.style.cssText = 'position: absolute; left: -9999px; top: 0; visibility: hidden; white-space: nowrap; font-variant-numeric: tabular-nums';
+document.body.append(probe);
+
 function fitAmount(status, decimals) {
+  const el = view.parts.amount;
+  const box = el.parentElement;
+  const boxStyle = getComputedStyle(box);
+  const width = box.clientWidth - parseFloat(boxStyle.paddingLeft) - parseFloat(boxStyle.paddingRight);
   const basisCents = Math.max(status.cents, status.capCents ?? 10000);
   const text = formatAmount(basisCents * 10 ** (decimals - 2), decimals);
-  const em = [...text].reduce((sum, ch) => sum + (ch === '.' || ch === ',' ? 0.3 : 0.62), 0);
-  if (em === view.em) return;
-  view.em = em;
-  const width = Math.min(meterEl.clientWidth - 40, 520);
-  amountEl.style.fontSize = `${Math.min(104, Math.floor(width / em))}px`;
+  const key = `${view.theme}|${text.length}|${width}`;
+  if (width <= 0 || key === view.fitKey) return;
+  view.fitKey = key;
+  const style = getComputedStyle(el);
+  const spacing = (parseFloat(style.letterSpacing) || 0) / parseFloat(style.fontSize);
+  Object.assign(probe.style, {
+    fontFamily: style.fontFamily, fontWeight: style.fontWeight, fontStretch: style.fontStretch,
+    fontSize: '100px', letterSpacing: `${spacing * 100}px`,
+  });
+  probe.textContent = text;
+  const max = parseFloat(style.getPropertyValue('--amount-max')) || 72;
+  el.style.fontSize = `${Math.min(max, Math.floor((width * 100) / probe.getBoundingClientRect().width))}px`;
 }
 
-// Digital display: the digits simply change, every frame if they need to, like a
-// stopwatch's hundredths.
-function renderNumber(status, decimals) {
-  const text = formatAmount(unitsEarned(status, decimals), decimals);
-  if (text === view.shown) return;
-  amountNumEl.textContent = text.slice(1); // the "$" is its own element so it can be green
-  view.shown = text;
-}
-
-// Things that only change once per cent: the spoken label, the progress bar, and a
-// small pulse on every new whole dollar.
+// Once per cent: the spoken label, and a small pulse on every new whole dollar.
 function renderCents(status) {
-  amountEl.setAttribute('aria-label', formatMoney(status.cents));
+  if (status.cents === view.cents) return;
+  const el = view.parts.amount;
+  el.setAttribute('aria-label', formatMoney(status.cents));
   const dollars = Math.floor(status.cents / 100);
   if (view.dollars != null && dollars > view.dollars && !reducedMotion.matches) {
-    amountEl.classList.remove('bump');
-    void amountEl.offsetWidth; // restart the animation
-    amountEl.classList.add('bump');
+    el.classList.remove('bump');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('bump');
   }
   view.dollars = dollars;
-  if (status.capCents != null) {
-    $('progress-fill').style.width = `${(status.progress * 100).toFixed(2)}%`;
-    setText($('progress-text'), status.phase === 'paid'
-      ? `All ${formatMoney(status.capCents)} earned`
-      : `${Math.floor(status.progress * 100)}% · ${formatMoney(status.capCents - status.cents)} to go`);
-  }
   view.cents = status.cents;
 }
 
-function renderQuip(status, now, phaseChanged) {
-  if (!phaseChanged && (status.phase !== 'running' || now - view.quipAt < 14000)) return;
-  const list = QUIPS[status.phase];
-  if (phaseChanged) view.quipIndex = Math.floor(Math.random() * list.length) - 1;
-  let text = null;
-  for (let tries = 0; tries < list.length && !text; tries++) {
-    view.quipIndex = (view.quipIndex + 1) % list.length;
-    text = list[view.quipIndex](status);
+// The Pay stub's printed log. The live "Running" line's clock is updated in place, so
+// the list (and its blinking cursor) is only rebuilt when the history changes.
+function renderLog(log, running) {
+  const ol = view.parts.log;
+  if (!ol) return;
+  const key = log.map((l, i) => (running && i === log.length - 1 ? 'live' : `${l.time} ${l.what} ${l.current}`)).join('|');
+  if (key !== view.logKey) {
+    view.logKey = key;
+    view.logClock = null;
+    ol.replaceChildren(...log.map((l, i) => {
+      const li = document.createElement('li');
+      const time = Object.assign(document.createElement('span'), { className: 't', textContent: l.time });
+      const what = Object.assign(document.createElement('span'), { textContent: l.what });
+      li.append(time, what);
+      if (l.current) li.append(Object.assign(document.createElement('span'), { className: 'cursor' }));
+      if (running && i === log.length - 1) view.logClock = time;
+      return li;
+    }));
   }
-  view.quipAt = now;
-  if (!text || text === quipEl.textContent) return;
-  if (!quipEl.textContent || reducedMotion.matches) return setText(quipEl, text);
-  quipEl.classList.add('fading');
-  setTimeout(() => {
-    quipEl.textContent = text;
-    quipEl.classList.remove('fading');
-  }, 350);
-}
-
-function renderButtons(status, now) {
-  const primary = $('primary');
-  const label = { idle: 'Start', waiting: 'Start now', running: 'Pause', paid: 'New gig' }[status.phase] ?? 'Resume';
-  setText(primary, label);
-  primary.classList.toggle('pause', status.running);
-  primary.classList.toggle('start', !status.running);
-
-  const resetBtn = $('reset');
-  const confirming = now < resetConfirmUntil;
-  resetBtn.disabled = status.phase === 'idle';
-  setText(resetBtn, confirming ? 'Sure?' : status.phase === 'waiting' ? 'Cancel' : 'Reset');
-  resetBtn.classList.toggle('confirm', confirming);
-}
-
-function renderNext(status, now) {
-  let text = '';
-  if (status.next) {
-    const left = Math.ceil((status.next.t - now) / 1000) * 1000;
-    text = `${NEXT_TEXT[status.next.kind]} ${clockLabel(status.next.t, now)} · in ${formatClock(left)}`;
-  } else if (session.config.mode === 'scheduled' && !session.scheduleArmed && status.phase !== 'paid') {
-    text = 'Schedule off · save Setup to turn it back on';
-  }
-  setText($('next'), text);
+  if (view.logClock) setText(view.logClock, log.at(-1).time);
 }
 
 function render(now) {
   const status = getStatus(session, now);
   const phaseChanged = status.phase !== view.phase;
-
   if (phaseChanged) {
-    if (status.phase === 'paid' && view.phase !== null) celebrate();
-    meterEl.dataset.phase = status.phase;
-    setText($('status-text'), STATUS_TEXT[status.phase]);
+    document.body.dataset.phase = status.phase;
+    syncTopBar();
     wakeWanted = status.running;
     syncWakeLock();
   }
 
   const decimals = decimalsOf(session.config);
-  fitAmount(status, decimals);
-  renderNumber(status, decimals);
-  if (status.cents !== view.cents) renderCents(status);
-
-  const second = Math.floor(status.workedMs / 1000);
-  if (second !== view.second) {
-    setText($('elapsed'), formatClock(status.workedMs));
-    view.second = second;
+  const vm = viewModel(session, status, now, decimals);
+  const confirming = now < resetConfirmUntil;
+  vm.resetLabel = confirming ? 'Sure?' : status.phase === 'waiting' ? 'Cancel' : 'Reset';
+  applyView(vm);
+  for (const button of view.parts.resets) {
+    button.disabled = status.phase === 'idle';
+    button.classList.toggle('confirm', confirming);
   }
-
-  renderNext(status, now);
-  renderButtons(status, now);
-  renderQuip(status, now, phaseChanged);
+  fitAmount(status, decimals);
+  renderCents(status);
+  renderLog(vm.log, status.running);
   view.phase = status.phase;
   return status;
 }
@@ -286,24 +257,8 @@ function frame() {
   loop.timer = setTimeout(frame, 250);
 }
 
-const kick = frame;
-
-function celebrate() {
-  if (reducedMotion.matches) return;
-  const box = $('confetti');
-  const symbols = ['$', '$', '¢', '💵', '💰'];
-  for (let i = 0; i < 36; i++) {
-    const s = document.createElement('span');
-    s.textContent = symbols[i % symbols.length];
-    s.style.left = `${Math.random() * 100}%`;
-    s.style.color = i % 2 ? 'var(--gold)' : 'var(--green)';
-    s.style.setProperty('--dx', `${(Math.random() - 0.5) * 160}px`);
-    s.style.setProperty('--rot', `${(Math.random() - 0.5) * 720}deg`);
-    s.style.setProperty('--dur', `${2 + Math.random() * 1.6}s`);
-    s.style.animationDelay = `${Math.random() * 0.6}s`;
-    box.append(s);
-  }
-  setTimeout(() => box.replaceChildren(), 4500);
+function kick() {
+  frame();
 }
 
 // ---------- keep the screen awake while earning ----------
@@ -332,18 +287,18 @@ async function syncWakeLock() {
   }
 }
 
-// ---------- meter controls ----------
+// ---------- meter controls (every look's buttons) ----------
 
-$('primary').addEventListener('click', () => {
+function pressPrimary() {
   const now = Date.now();
-  if (getStatus(session, now).phase === 'paid') return openSetup();
+  if (getStatus(session, now).phase === 'paid') return openSetup({ newGig: true });
   session = toggle(session, now);
   persist();
   kick();
-});
+}
 
 // Reset asks "Sure?" first whenever there's money on the meter.
-$('reset').addEventListener('click', () => {
+function pressReset() {
   const now = Date.now();
   if (getStatus(session, now).cents > 0 && now >= resetConfirmUntil) {
     resetConfirmUntil = now + 3000;
@@ -353,16 +308,24 @@ $('reset').addEventListener('click', () => {
   session = reset(session);
   persist();
   kick();
-});
+}
 
-$('open-setup').addEventListener('click', () => openSetup());
+document.addEventListener('click', (e) => {
+  const button = e.target.closest('[data-action]');
+  if (!button || button.disabled) return;
+  const { action } = button.dataset;
+  if (action === 'setup') openSetup();
+  else if (action === 'primary') pressPrimary();
+  else if (action === 'reset') pressReset();
+});
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) kick();
   syncWakeLock();
 });
 window.addEventListener('pageshow', kick);
-window.addEventListener('resize', () => { view.em = 0; kick(); });
+window.addEventListener('resize', () => { view.fitKey = ''; kick(); });
+document.fonts?.addEventListener?.('loadingdone', () => { view.fitKey = ''; kick(); });
 
 // ---------- setup sheet ----------
 
@@ -398,16 +361,19 @@ function fillForm(config) {
   const schedule = { ...defaultConfig().schedule, ...config.schedule };
   // A past session comes back with the same times on the next day they're still ahead.
   const now = Date.now();
+  const savedDate = schedule.date;
   for (let d = new Date(); buildSchedule(schedule).endMs <= now; d.setDate(d.getDate() + 1)) {
     schedule.date = todayISO(d);
     if (d - now > 2 * 86400000) break;
   }
+  rolledDate = schedule.date !== savedDate ? { saved: savedDate, shown: schedule.date } : null;
   $('f-date').value = schedule.date;
   $('f-start').value = schedule.start;
   $('f-end').value = schedule.end;
   const breaks = Array.isArray(schedule.breaks) ? schedule.breaks : [];
   $('f-breaks').replaceChildren(...breaks.map(breakRow));
   form.elements.decimals.value = String(decimalsOf(config));
+  form.elements.theme.value = themeOf(config);
 }
 
 function readForm() {
@@ -429,11 +395,12 @@ function readForm() {
       })),
     },
     decimals: Number(form.elements.decimals.value) || DEFAULT_DECIMALS,
+    theme: themeOf({ theme: form.elements.theme.value }),
   };
 }
 
-// Only changes to pay or timing start a fresh meter; a new name or decimal places
-// keep it running. Fields that don't apply to the chosen setup are ignored.
+// Only changes to pay or timing start a fresh meter; a new name, look or decimal
+// places keep it running. Fields that don't apply to the chosen setup are ignored.
 function payKey(config) {
   const flat = FORMATS[config.format]?.kind === 'flat';
   const scheduled = config.mode === 'scheduled';
@@ -446,11 +413,18 @@ function payKey(config) {
   ]);
 }
 
-// Saving restarts the meter when pay or timing changed, or to switch a schedule that
-// Reset turned off back on.
+// The form as it would be saved without Setup's automatic date change: an ended
+// session's date shown moved forward but left untouched isn't a change.
+function asSaved(config) {
+  if (!rolledDate || config.schedule.date !== rolledDate.shown) return config;
+  return { ...config, schedule: { ...config.schedule, date: rolledDate.saved } };
+}
+
+// Saving restarts the meter when pay or timing changed, to switch a schedule that
+// Reset turned off back on, or when Setup was opened from "New gig".
 function saveRestarts(config) {
   const rearm = config.mode === 'scheduled' && !session.scheduleArmed;
-  return !hasSaved || rearm || payKey(config) !== payKey(session.config);
+  return !hasSaved || newGigSetup || rearm || payKey(asSaved(config)) !== payKey(session.config);
 }
 
 function formError(config, now) {
@@ -483,7 +457,7 @@ function updateForm(showErrors = false) {
   } else {
     const preview = getStatus(newSession(config), now);
     const rate = rateText(preview);
-    setText(summary, preview.plannedMs ? `${durationText(preview.plannedMs)} of work · ${rate}` : rate);
+    setText(summary, preview.plannedMs ? `${durationLong(preview.plannedMs)} of work · ${rate}` : rate);
   }
 
   setText($('save'), saveLabel(config, now));
@@ -502,21 +476,38 @@ function saveLabel(config, now) {
   return now < saveConfirmUntil ? `Tap again to clear ${formatMoney(cents)}` : 'Save & restart meter';
 }
 
-function openSetup() {
+function openSetup({ newGig = false } = {}) {
   saveConfirmUntil = 0;
+  newGigSetup = newGig;
+  $('setup').classList.remove('peek');
   fillForm(session.config);
   $('cancel-setup').style.visibility = hasSaved ? '' : 'hidden'; // keeps the title centered
   $('setup').hidden = false;
   updateForm();
 }
 
+// Closing without saving also undoes a look being previewed.
 function closeSetup() {
   $('setup').hidden = true;
+  applyTheme(themeOf(session.config));
+  kick();
   if (reloadWhenSetupCloses) location.reload();
 }
 
 form.addEventListener('input', () => updateForm());
-form.addEventListener('change', () => updateForm());
+form.addEventListener('change', (e) => {
+  if (e.target.name === 'theme') {
+    applyTheme(themeOf({ theme: e.target.value }));
+    $('setup').classList.add('peek');
+    kick();
+  }
+  updateForm();
+});
+
+$('all-settings').addEventListener('click', () => {
+  $('setup').classList.remove('peek');
+  form.querySelector('.look-field').scrollIntoView({ block: 'center' });
+});
 
 $('add-break').addEventListener('click', () => {
   const rows = [...$('f-breaks').children];
@@ -554,18 +545,16 @@ form.addEventListener('submit', (e) => {
     Object.assign(view, { phase: null, dollars: null });
     resetConfirmUntil = 0;
   } else {
-    session = { ...session, config };
+    session = { ...session, config: asSaved(config) };
   }
   persist();
+  Object.assign(view, { cents: -1, fitKey: '', logKey: '' });
   closeSetup();
-  Object.assign(view, { cents: -1, shown: '', second: -1, em: 0 });
-  renderConfig();
-  kick();
 });
 
 // ---------- start ----------
 
-renderConfig();
+applyTheme(themeOf(session.config));
 kick();
 if (!hasSaved) openSetup();
 
