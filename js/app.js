@@ -255,13 +255,16 @@ function render(now) {
 // A timer also checks four times a second: it drives countdowns and the schedule
 // starting the meter on its own, and keeps the number moving if the browser stops
 // delivering frames (Low Power Mode, background webviews).
+// The timer is never allowed to stop. It is set before drawing, so a drawing error
+// can't end the loop, and it keeps ticking once a second while the page is hidden, so
+// if the phone shows the page again without announcing it, the next tick picks the
+// meter back up. (iPhones pause hidden pages anyway, so this costs no battery.)
 function frame() {
   cancelAnimationFrame(loop.raf);
   clearTimeout(loop.timer);
+  loop.timer = setTimeout(frame, document.hidden ? 1000 : 250);
   const status = render(Date.now());
-  if (document.hidden) return;
-  if (status.running) loop.raf = requestAnimationFrame(frame);
-  loop.timer = setTimeout(frame, 250);
+  if (!document.hidden && status.running) loop.raf = requestAnimationFrame(frame);
 }
 
 function kick() {
@@ -347,6 +350,7 @@ document.addEventListener('visibilitychange', () => {
   syncWakeLock();
 });
 window.addEventListener('pageshow', kick);
+window.addEventListener('focus', kick);
 window.addEventListener('resize', () => { view.fitKey = ''; kick(); });
 document.fonts?.addEventListener?.('loadingdone', () => { view.fitKey = ''; kick(); });
 
