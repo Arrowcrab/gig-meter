@@ -161,10 +161,13 @@
 
       <fieldset class="field times" id="times-field" hidden>
         <legend class="label">This gig</legend>
-        <label class="field" id="begin-wrap">
-          <span class="label">Already working? Started at</span>
-          <input type="time" id="f-begin-at">
-        </label>
+        <div class="field" id="begin-wrap">
+          <label class="label" for="f-begin-at">Already working? Started at</label>
+          <div class="time-clear">
+            <input type="time" id="f-begin-at">
+            <button type="button" class="link-btn" id="clear-begin" aria-label="Clear the start time">Clear</button>
+          </div>
+        </div>
         <div class="row" id="fix-wrap">
           <label class="field" id="start-at-wrap"><span class="label">Started at</span><input type="time" id="f-start-at"></label>
           <label class="field" id="end-at-wrap"><span class="label" id="end-at-label">Stopped at</span><input type="time" id="f-end-at"></label>

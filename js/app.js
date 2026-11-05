@@ -537,6 +537,7 @@ function updateForm(showErrors = false) {
   $('times-field').hidden = !mode;
   $('begin-wrap').hidden = mode !== 'begin';
   $('fix-wrap').hidden = mode !== 'fix';
+  $('clear-begin').style.visibility = $('f-begin-at').value ? '' : 'hidden';
   $('start-at-wrap').hidden = !timesShown.start;
   $('end-at-wrap').hidden = !timesShown.end;
   setText($('times-hint'), mode === 'begin'
@@ -593,6 +594,7 @@ function openSetup({ newGig = false } = {}) {
   fillForm(session.config);
   $('cancel-setup').style.visibility = hasSaved ? '' : 'hidden'; // keeps the title centered
   $('setup').hidden = false;
+  form.scrollTop = 0; // the sheet is reused, so it would otherwise reopen where it was left
   updateForm();
 }
 
@@ -626,6 +628,11 @@ function addBreak() {
   const from = rows.length ? rows.at(-1).querySelector('.b-start').value : $('f-start').value;
   $('f-breaks').append(breakRow({ start: from ? addToTime(from, 60) : '', minutes: 10 }));
 }
+
+$('clear-begin').addEventListener('click', () => {
+  $('f-begin-at').value = '';
+  updateForm();
+});
 
 $('add-break').addEventListener('click', () => {
   addBreak();

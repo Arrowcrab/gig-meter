@@ -319,6 +319,11 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 /* "This gig": correcting when it started or stopped. */
 .times .field { margin: 0; }
 .times .row .field .label, .times > .field .label { font-size: 13px; font-weight: 500; color: var(--muted); }
+/* Tapping an empty time box on iPhone fills in the current time; Clear empties it.
+   Clear keeps its space while hidden so the box doesn't move under the time picker. */
+.time-clear { display: flex; align-items: center; gap: 8px; }
+.time-clear input { flex: 1; width: auto; min-width: 0; }
+.time-clear .link-btn { flex: none; }
 
 .duration { display: flex; align-items: center; gap: 8px; }
 .duration input { width: 84px; text-align: center; }
