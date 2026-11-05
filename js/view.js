@@ -1,7 +1,7 @@
 // Screen text for every look. Pure: given a session, its status and the time, it
 // returns the strings and numbers the four looks show, so they all agree.
 
-import { formatAmount, formatMoney, formatClock, unitsEarned, history } from './meter.js';
+import { FORMATS, formatAmount, formatMoney, formatClock, unitsEarned, history, validateConfig } from './meter.js';
 
 // The looks the app can wear. `fonts` is the Google Fonts family list each needs
 // (loaded only when that look is on); `color` is its top-of-screen color.
@@ -175,4 +175,63 @@ export function viewModel(session, status, now, decimals) {
     receiptDate: receiptDate(firstMoment),
     log: log.slice(-LOG_LINES),
   };
+}
+
+// ---------- saved gigs ----------
+// A short list of regular gigs kept on the phone, each a full copy of a Setup
+// ({ id, config, savedAt }), newest first. Pure: the app stores and shows the list.
+
+export const SAVED_MAX = 12;
+
+const savedPay = (config) => `${formatPay(config.amountCents)} ${UNITS[config.format]}`;
+const time12 = (hhmm) => {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return `${h % 12 || 12}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
+};
+
+// The gig's name; an unnamed gig goes by its pay and times instead.
+export const savedTitle = (config) => config.name?.trim() || savedSummary(config);
+
+// "$210 per service · 7:00 PM–10:00 PM", "$500 for the job · 3 hr of work", "$60 per hour".
+export function savedSummary(config) {
+  const pay = savedPay(config);
+  if (config.mode === 'scheduled' && config.schedule) return `${pay} · ${time12(config.schedule.start)}–${time12(config.schedule.end)}`;
+  if (FORMATS[config.format]?.kind === 'flat' && config.plannedMinutes > 0) return `${pay} · ${durationLong(config.plannedMinutes * 60000)} of work`;
+  return pay;
+}
+
+// Two saved gigs are the same gig when their names match (ignoring case and spaces);
+// unnamed ones when their pay and times match.
+const savedKey = (config) => {
+  const name = (config.name || '').trim().toLowerCase();
+  return name ? `name:${name}` : `pay:${savedSummary(config)}`;
+};
+
+export const matchSaved = (list, config) => list.find((e) => savedKey(e.config) === savedKey(config)) ?? null;
+
+// Saving the same gig again updates it (same id) and moves it to the top. A full list
+// says so rather than quietly dropping one.
+export function upsertSaved(list, config, { id, now }) {
+  const found = matchSaved(list, config);
+  if (found) return { list: [{ ...found, config, savedAt: now }, ...list.filter((e) => e !== found)], replaced: true };
+  if (list.length >= SAVED_MAX) return { list, replaced: false, error: `You can keep up to ${SAVED_MAX} saved gigs. Remove one first.` };
+  return { list: [{ id, config, savedAt: now }, ...list], replaced: false };
+}
+
+export const removeSaved = (list, id) => list.filter((e) => e.id !== id);
+
+// The stored list, keeping only entries that still make a usable Setup.
+export function readSaved(raw) {
+  let data;
+  try { data = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(data)) return [];
+  const seen = new Set();
+  const list = [];
+  for (const e of data) {
+    if (!e || typeof e.id !== 'string' || !e.id || seen.has(e.id) || validateConfig(e.config)) continue;
+    seen.add(e.id);
+    list.push({ id: e.id, config: e.config, savedAt: Number(e.savedAt) || 0 });
+    if (list.length === SAVED_MAX) break;
+  }
+  return list;
 }

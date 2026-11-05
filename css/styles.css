@@ -231,6 +231,7 @@ h1, h2, p { margin: 0; }
   max-width: 560px;
   max-height: 94dvh;
   overflow-y: auto;
+  overflow-anchor: none; /* the app keeps things in place itself, the same in every browser */
   -webkit-overflow-scrolling: touch;
   padding: 0 20px;
   border-radius: 16px 16px 0 0;
@@ -443,6 +444,32 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
   color: var(--text);
   font-size: 15px;
 }
+#save-gig.done { border-style: solid; border-color: var(--select); }
+.hint.error { color: var(--danger); }
+
+/* Saved gigs: tap a row to fill in Setup with it; × then "Remove" deletes it. The row
+   matching the gig being edited is outlined. */
+.saved-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.saved-load {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  text-align: left;
+}
+.saved-load[aria-current="true"] { border-color: var(--select); box-shadow: inset 0 0 0 1px var(--select); }
+.saved-title, .saved-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-title { font-size: 16px; font-weight: 600; }
+.saved-sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.saved-row .remove.confirm { width: auto; padding: 0 12px; color: var(--danger); font-size: 15px; font-weight: 600; }
 
 .sheet-foot {
   position: sticky;

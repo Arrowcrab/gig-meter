@@ -17,7 +17,10 @@ import {
   setStartTime,
   setEndTime,
 } from './meter.js';
-import { THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong } from './view.js';
+import {
+  THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong,
+  savedTitle, savedSummary, upsertSaved, removeSaved, matchSaved, readSaved,
+} from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
 const $ = (id) => document.getElementById(id);
@@ -103,6 +106,21 @@ let hasSaved = false;
 let session = load();
 if (session) hasSaved = true;
 else session = newSession(defaultConfig()); // shown behind the first-run setup, not saved
+
+// Saved gigs: regular gigs kept apart from the meter, loaded into Setup with one tap.
+const SAVED_KEY = 'gig-meter:saved:v1';
+let savedGigs = [];
+try { savedGigs = readSaved(localStorage.getItem(SAVED_KEY)); } catch { savedGigs = []; }
+let savedNoteUntil = 0; // "Saved ✓" shows on the button for a moment after adding,
+let savedNoteId = ''; // while the form still shows that saved gig
+
+function persistSaved() {
+  try {
+    localStorage.setItem(SAVED_KEY, JSON.stringify(savedGigs));
+  } catch {
+    // Storage unavailable: the list still works until the app is closed.
+  }
+}
 
 // ---------- looks ----------
 
@@ -575,7 +593,108 @@ function updateForm(showErrors = false) {
 
   const label = saveLabel(config, now);
   setText($('save'), label === 'Save' && mode === 'begin' && timesChanged(mode) ? 'Save & start' : label);
+  markSaved(config);
 }
+
+// ---------- saved gigs in Setup ----------
+
+const SAVED_HINT = 'Keeps this gig’s pay, times and look, to fill in with one tap next time.';
+
+function savedHint(text, isError = false) {
+  setText($('save-gig-hint'), text);
+  $('save-gig-hint').classList.toggle('error', isError);
+}
+
+// Outline the saved gig that matches the one being edited, and offer to update it.
+function markSaved(config) {
+  const match = matchSaved(savedGigs, config);
+  for (const li of $('saved-list').children) {
+    li.querySelector('.saved-load').setAttribute('aria-current', String(li.dataset.id === match?.id));
+  }
+  if (Date.now() < savedNoteUntil && match?.id === savedNoteId) return;
+  $('save-gig').classList.remove('done');
+  setText($('save-gig'), match ? `Update “${savedTitle(match.config)}” in saved gigs` : '+ Add to saved gigs');
+}
+
+function savedRow(entry) {
+  const li = $('saved-row').content.firstElementChild.cloneNode(true);
+  li.dataset.id = entry.id;
+  const title = savedTitle(entry.config);
+  const summary = savedSummary(entry.config);
+  setText(li.querySelector('.saved-title'), title);
+  setText(li.querySelector('.saved-sub'), summary);
+  li.querySelector('.saved-sub').hidden = summary === title; // an unnamed gig's title already says it
+  li.querySelector('.saved-load').addEventListener('click', () => loadSaved(entry));
+  // Removing takes two taps: × turns into "Remove" for a few seconds.
+  const remove = li.querySelector('.remove');
+  let undoTimer = 0;
+  const unarm = () => {
+    remove.classList.remove('confirm');
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Remove saved gig');
+  };
+  remove.addEventListener('click', () => {
+    if (!remove.classList.contains('confirm')) {
+      remove.classList.add('confirm');
+      remove.textContent = 'Remove';
+      remove.setAttribute('aria-label', `Tap again to remove ${savedTitle(entry.config)}`);
+      undoTimer = setTimeout(unarm, 3000);
+      return;
+    }
+    clearTimeout(undoTimer);
+    savedGigs = removeSaved(savedGigs, entry.id);
+    persistSaved();
+    renderSaved();
+    updateForm();
+  });
+  return li;
+}
+
+function renderSaved() {
+  $('saved-field').hidden = !savedGigs.length;
+  $('saved-list').replaceChildren(...savedGigs.map(savedRow));
+}
+
+// Loading fills in Setup only. Save then starts that gig fresh, as "New gig" does
+// (and still asks first if a running gig has money on it); Cancel undoes it all.
+function loadSaved(entry) {
+  fillForm(entry.config);
+  newGigSetup = true;
+  saveConfirmUntil = 0;
+  applyTheme(themeOf(entry.config)); // preview its look
+  kick();
+  savedHint(SAVED_HINT);
+  updateForm();
+}
+
+$('save-gig').addEventListener('click', () => {
+  const config = readForm();
+  const error = validateConfig(config);
+  if (error) {
+    savedHint(error, true);
+    return;
+  }
+  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const result = upsertSaved(savedGigs, config, { id, now: Date.now() });
+  if (result.error) {
+    savedHint(result.error, true);
+    return;
+  }
+  savedGigs = result.list;
+  persistSaved();
+  // The list above may appear or grow; keep this button where the finger is (iPhone
+  // Safari doesn't hold the scroll position steady on its own).
+  const before = $('save-gig').getBoundingClientRect().top;
+  renderSaved();
+  form.scrollTop += $('save-gig').getBoundingClientRect().top - before;
+  savedHint(SAVED_HINT);
+  savedNoteUntil = Date.now() + 2000;
+  savedNoteId = result.list[0].id;
+  $('save-gig').classList.add('done');
+  setText($('save-gig'), result.replaced ? 'Updated ✓' : 'Saved ✓');
+  setTimeout(() => { savedNoteUntil = 0; markSaved(readForm()); }, 2000);
+  updateForm();
+});
 
 // When saving would restart a meter with money on it, Save asks for a second tap.
 function moneyAtRisk(config, now) {
@@ -595,6 +714,8 @@ function openSetup({ newGig = false } = {}) {
   newGigSetup = newGig;
   $('setup').classList.remove('peek');
   fillForm(session.config);
+  renderSaved();
+  savedHint(SAVED_HINT);
   $('cancel-setup').style.visibility = hasSaved ? '' : 'hidden'; // keeps the title centered
   $('setup').hidden = false;
   form.scrollTop = 0; // the sheet is reused, so it would otherwise reopen where it was left

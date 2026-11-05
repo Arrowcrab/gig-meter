@@ -175,6 +175,12 @@
         <span class="hint" id="times-hint"></span>
       </fieldset>
 
+      <fieldset class="field" id="saved-field" hidden>
+        <legend class="label">Saved gigs</legend>
+        <ul class="saved-list" id="saved-list"></ul>
+        <span class="hint">Tap one to fill in Setup with it. Nothing changes until you tap Save.</span>
+      </fieldset>
+
       <label class="field">
         <span class="label">Gig name <em>optional</em></span>
         <input id="f-name" type="text" maxlength="40" placeholder="Saturday wedding">
@@ -260,6 +266,11 @@
         <span class="hint">More places means faster-moving digits. Changing this doesn’t restart the meter.</span>
       </fieldset>
 
+      <div class="field">
+        <button type="button" class="add-break" id="save-gig">+ Add to saved gigs</button>
+        <span class="hint" id="save-gig-hint">Keeps this gig’s pay, times and look, to fill in with one tap next time.</span>
+      </div>
+
       <footer class="sheet-foot">
         <p class="summary" id="summary" aria-live="polite"></p>
         <button type="submit" class="save" id="save">Save</button>
@@ -273,6 +284,13 @@
       <input type="number" class="b-min" inputmode="numeric" min="1" max="240" aria-label="Break length in minutes">
       <span>min</span>
       <button type="button" class="remove" aria-label="Remove break">&times;</button>
+    </li>
+  </template>
+
+  <template id="saved-row">
+    <li class="saved-row">
+      <button type="button" class="saved-load"><span class="saved-title"></span><span class="saved-sub"></span></button>
+      <button type="button" class="remove" aria-label="Remove saved gig">&times;</button>
     </li>
   </template>
 </body>
