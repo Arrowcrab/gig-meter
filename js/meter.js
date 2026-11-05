@@ -42,11 +42,21 @@ export function formatAmount(units, decimals = 2) {
 export const formatMoney = (cents) => formatAmount(cents, 2);
 
 // Earnings at the given precision, rounded down, so 2 places equals status.cents.
+// The parts (the pay rate's time, then any overtime) are added as exact fractions
+// before rounding, and extras are whole cents, so every precision agrees and none
+// ever runs ahead of what was actually earned.
 export function unitsEarned(status, decimals = 2) {
-  const { amountCents, perMs } = status.payRate;
-  if (!(perMs > 0)) return 0;
   const scale = 10n ** BigInt(decimals - 2);
-  return Number((BigInt(amountCents) * scale * BigInt(status.workedMs)) / BigInt(perMs));
+  const parts = status.parts ?? [{ ...status.payRate, workedMs: status.workedMs }];
+  let num = 0n;
+  let den = 1n;
+  for (const { amountCents, perMs, workedMs } of parts) {
+    if (!(perMs > 0) || !(workedMs > 0)) continue;
+    const p = BigInt(perMs);
+    num = num * p + BigInt(amountCents) * BigInt(workedMs) * scale * den;
+    den *= p;
+  }
+  return Number(num / den) + (status.extrasCents ?? 0) * Number(scale);
 }
 
 // 1:02:03 once past an hour, otherwise 02:03.
@@ -122,8 +132,19 @@ export function validateConfig(config) {
   } else if (format.kind === 'flat' && !(config.plannedMinutes > 0)) {
     return 'Enter how long the job runs.';
   }
+  const extras = Array.isArray(config.extras) ? config.extras : [];
+  for (const [i, x] of extras.entries()) {
+    if (!Number.isSafeInteger(x?.amountCents) || x.amountCents <= 0) return x?.label ? `Add an amount for ${x.label}.` : `Extra ${i + 1} needs an amount.`;
+  }
+  if (config.overtime?.on && !(Number.isSafeInteger(config.overtime.amountCents) && config.overtime.amountCents > 0)) {
+    return 'Enter an overtime rate above $0.';
+  }
   return null;
 }
+
+// Add-ons like parking or cartage: whole cents, counted once the gig has started.
+const extrasTotal = (config) => (Array.isArray(config.extras) ? config.extras : [])
+  .reduce((sum, x) => sum + (Number.isSafeInteger(x?.amountCents) && x.amountCents > 0 ? x.amountCents : 0), 0);
 
 export function newSession(config) {
   return { config, events: [], scheduleArmed: config.mode === 'scheduled' };
@@ -138,27 +159,31 @@ function payRate(config, built) {
   return { amountCents: config.amountCents, perMs: plannedMs, capMs: plannedMs };
 }
 
-function scheduleEvents(built) {
+// With overtime on, the scheduled end doesn't stop the meter (run: null leaves it as
+// it was); it marks where overtime begins.
+function scheduleEvents(built, overtimeOn = false) {
   const events = [{ t: built.startMs, run: true, kind: 'start' }];
   for (const b of built.breaks) {
     events.push({ t: b.startMs, run: false, kind: 'break' }, { t: b.endMs, run: true, kind: 'breakEnd' });
   }
-  events.push({ t: built.endMs, run: false, kind: 'end' });
+  events.push(overtimeOn ? { t: built.endMs, run: null, kind: 'overtime' } : { t: built.endMs, run: false, kind: 'end' });
   return events;
 }
 
 function runState(events, now) {
   let running = false;
+  let ran = false;
   let since = 0;
   let worked = 0;
   for (const e of events) {
     if (e.t > now) break;
     if (running) worked += e.t - since;
-    running = e.run;
+    running = e.run ?? running;
+    ran ||= running;
     since = e.t;
   }
   if (running) worked += now - since;
-  return { running, worked };
+  return { running, worked, ran };
 }
 
 // Everything getStatus and history share: the usable schedule, the pay rate, and the
@@ -169,92 +194,170 @@ function prepare(session) {
   const schedule = built && !built.error ? built : null;
   const armed = Boolean(session.scheduleArmed && schedule);
   const rate = payRate(config, schedule);
+  // Overtime needs a planned end: the full fee, or an hourly schedule's end.
+  const ot = config.overtime;
+  const overtime = ot?.on && ot.amountCents > 0 && (rate.capMs > 0 || armed)
+    ? { centsPerHour: ot.amountCents, atMs: rate.capMs > 0 ? null : schedule.endMs }
+    : null;
   // On a tie, the manual tap comes second (sort is stable), so the user's tap wins.
   const manual = session.events.map((e) => ({ t: e.t, run: e.type === 'resume', kind: e.type === 'stop' ? 'stop' : 'manual' }));
-  let timeline = [...(armed ? scheduleEvents(schedule) : []), ...manual].sort((a, b) => a.t - b.t);
+  let timeline = [...(armed ? scheduleEvents(schedule, Boolean(overtime)) : []), ...manual].sort((a, b) => a.t - b.t);
   // Stop is final: nothing after it, scheduled or tapped, counts.
   const stopIndex = timeline.findIndex((e) => e.kind === 'stop');
   const stopAt = stopIndex === -1 ? null : timeline[stopIndex].t;
   if (stopIndex !== -1) timeline = timeline.slice(0, stopIndex + 1);
-  return { schedule, armed, rate, timeline, stopAt };
+  return { schedule, armed, rate, timeline, stopAt, overtime };
 }
 
 // What has happened so far, oldest first: every scheduled change or tap that actually
 // started or stopped the meter, then the moment a flat fee was paid in full (after
 // which nothing else matters). Kinds: start, resume, pause, break, back, end, stop, paid.
+// With overtime on, the moment the fee is earned (or an hourly schedule ends) is an
+// "overtime" entry instead, and the gig carries on until Stop.
 export function history(session, nowInput) {
   const now = Math.floor(nowInput);
-  const { rate, timeline } = prepare(session);
+  const { rate, timeline, overtime } = prepare(session);
   const capped = rate.capMs != null && rate.capMs > 0;
   const entries = [];
   let running = false;
   let started = false;
+  let feeDone = false;
+  let overtimePending = false; // an hourly schedule ended while paused: overtime starts on resume
   let since = 0;
   let worked = 0;
 
-  const paidBy = (t) => running && capped && worked + (t - since) >= rate.capMs;
+  // The fee is earned during the running stretch that ends at t.
+  const paidBy = (t) => running && capped && !feeDone && worked + (t - since) >= rate.capMs;
+  const feeEarned = () => {
+    entries.push({ t: since + (rate.capMs - worked), kind: overtime ? 'overtime' : 'paid' });
+    feeDone = true;
+  };
   for (const e of timeline) {
     if (e.t > now) break;
     if (paidBy(e.t)) {
-      entries.push({ t: since + (rate.capMs - worked), kind: 'paid' });
-      return entries;
+      feeEarned();
+      if (!overtime) return entries;
     }
     if (running) worked += e.t - since;
     if (e.kind === 'stop') {
       entries.push({ t: e.t, kind: 'stop' });
       return entries;
     }
-    if (e.run !== running) {
+    if (e.run === null) {
+      // The end of an hourly schedule with overtime on: the meter carries on.
+      if (overtime?.atMs != null) {
+        if (running) entries.push({ t: e.t, kind: 'overtime' });
+        else overtimePending = true;
+      }
+    } else if (e.run !== running) {
       let kind;
       if (e.kind === 'manual' || e.kind === 'start') kind = e.run ? (started ? 'resume' : 'start') : 'pause';
       else kind = { break: 'break', breakEnd: 'back', end: 'end' }[e.kind];
       entries.push({ t: e.t, kind });
       if (e.run) started = true;
+      if (e.run && overtimePending) {
+        entries.push({ t: e.t, kind: 'overtime' });
+        overtimePending = false;
+      }
+      running = e.run;
     }
-    running = e.run;
     since = e.t;
   }
-  if (paidBy(now)) entries.push({ t: since + (rate.capMs - worked), kind: 'paid' });
+  if (paidBy(now)) feeEarned();
   return entries;
+}
+
+// When a running fee-based gig will have earned its fee, if nothing is tapped: walk
+// the schedule's remaining stops and starts (breaks) from now.
+function feeEarnedAt(ahead, now, left) {
+  let t = now;
+  let run = true;
+  for (const e of ahead) {
+    if (run && t + left <= e.t) return t + left;
+    if (run) left -= e.t - t;
+    t = e.t;
+    run = e.run ?? run;
+  }
+  return run ? t + left : null;
 }
 
 export function getStatus(session, nowInput) {
   const now = Math.floor(nowInput);
-  const { schedule, armed, rate, timeline, stopAt } = prepare(session);
+  const { schedule, armed, rate, timeline, stopAt, overtime } = prepare(session);
   const state = runState(timeline, now);
   const stopped = stopAt != null && now >= stopAt;
+  const capped = rate.capMs != null && rate.capMs > 0;
 
-  const workedMs = rate.capMs == null ? state.worked : Math.min(state.worked, rate.capMs);
+  // Worked time at the pay rate, and (with overtime on) past the planned end.
+  let baseMs = capped ? Math.min(state.worked, rate.capMs) : state.worked;
+  let overtimeMs = 0;
+  if (overtime) {
+    if (capped) overtimeMs = state.worked - baseMs;
+    else {
+      baseMs = runState(timeline, Math.min(now, overtime.atMs)).worked;
+      overtimeMs = state.worked - baseMs;
+    }
+  }
   const earning = { amountCents: rate.amountCents, perMs: rate.perMs };
-  const cents = unitsEarned({ payRate: earning, workedMs }, 2);
-  const paid = rate.capMs != null && rate.capMs > 0 && workedMs >= rate.capMs;
+  const overtimeRate = overtime ? { amountCents: overtime.centsPerHour, perMs: HOUR } : null;
+  const baseCents = unitsEarned({ parts: [{ ...earning, workedMs: baseMs }] }, 2);
+  const overtimeCents = overtime ? unitsEarned({ parts: [{ ...overtimeRate, workedMs: overtimeMs }] }, 2) : 0;
+  const extrasCents = state.ran ? extrasTotal(session.config) : 0;
+  const parts = [{ ...earning, workedMs: baseMs }, ...(overtime ? [{ ...overtimeRate, workedMs: overtimeMs }] : [])];
+  const cents = unitsEarned({ parts, extrasCents }, 2);
+  const feeDone = capped && baseMs >= rate.capMs;
+  const paid = feeDone && !overtime;
+  // Past the planned end with overtime on: the fee is earned, or an hourly schedule is over.
+  const pastEnd = Boolean(overtime) && (capped ? feeDone : now >= overtime.atMs);
+  const running = state.running && !paid;
+
+  const inBreak = armed && schedule.breaks.some((b) => now >= b.startMs && now < b.endMs);
 
   let phase;
-  if (paid) phase = 'paid';
+  if (overtime && stopped) phase = feeDone ? 'paid' : 'over';
+  else if (pastEnd) phase = running ? 'overtime' : inBreak ? 'break' : 'paused';
+  else if (paid) phase = 'paid';
   else if (state.running) phase = 'running';
   else if (stopped) phase = 'over';
   else if (armed) {
     if (now < schedule.startMs && !session.events.some((e) => e.t <= now)) phase = 'waiting';
-    else if (now >= schedule.endMs) phase = 'over';
+    else if (now >= schedule.endMs && !overtime) phase = 'over';
     else if (schedule.breaks.some((b) => now >= b.startMs && now < b.endMs)) phase = 'break';
     else phase = 'paused';
   } else phase = session.events.length ? 'paused' : 'idle';
 
-  // The next scheduled change that will actually start or stop the meter. A scheduled
-  // start is skipped if the user already started early, a break end if they never stopped.
-  const next = armed && !paid && !stopped ? scheduleEvents(schedule).find((e) => e.t > now && e.run !== state.running) : null;
+  // The next scheduled change that will actually start or stop the meter (or begin
+  // overtime). A scheduled start is skipped if the user already started early, a break
+  // end if they never stopped.
+  let next = null;
+  if (armed && !paid && !stopped) {
+    const ahead = scheduleEvents(schedule, Boolean(overtime)).filter((e) => e.t > now);
+    next = ahead.find((e) => e.run !== null && e.run !== state.running) ?? null;
+    // Overtime begins at an hourly schedule's end, or when the fee will be earned (counting
+    // the breaks still to come). Only shown while the meter is running toward it.
+    if (overtime && !pastEnd && state.running) {
+      const at = capped ? feeEarnedAt(ahead, now, rate.capMs - baseMs) : overtime.atMs;
+      if (at != null && (!next || at < next.t)) next = { t: at, kind: 'overtime' };
+    }
+  }
+  const current = pastEnd ? overtimeRate : earning;
 
   return {
     phase,
-    running: state.running && !paid,
+    running,
     cents,
-    workedMs,
+    baseCents,
+    extrasCents,
+    overtimeCents,
+    overtimeMs,
+    workedMs: overtime ? state.worked : baseMs,
     capCents: rate.capMs == null ? null : rate.amountCents,
     plannedMs: rate.capMs,
-    progress: rate.capMs ? workedMs / rate.capMs : null,
+    progress: rate.capMs ? baseMs / rate.capMs : null,
     next: next ? { t: next.t, kind: next.kind } : null,
-    centsPerHour: rate.perMs > 0 ? (rate.amountCents * HOUR) / rate.perMs : 0,
-    payRate: earning,
+    centsPerHour: current.perMs > 0 ? (current.amountCents * HOUR) / current.perMs : 0,
+    payRate: current,
+    parts,
     schedule: armed ? schedule : null,
     stopped,
   };

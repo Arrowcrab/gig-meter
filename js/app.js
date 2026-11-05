@@ -428,6 +428,23 @@ function breakRow(b) {
   return li;
 }
 
+// Money typed into a box: "15" or "12.50" back from whole cents.
+const moneyText = (cents) => (cents ? (cents / 100).toFixed(2).replace(/\.00$/, '') : '');
+
+function extraRow(x = {}) {
+  const li = $('extra-row').content.firstElementChild.cloneNode(true);
+  li.querySelector('.x-label').value = x.label || '';
+  li.querySelector('.x-amount').value = moneyText(x.amountCents);
+  li.querySelector('.remove').addEventListener('click', () => {
+    li.remove();
+    updateForm();
+  });
+  return li;
+}
+
+// Overtime needs a planned end: a fee (with its planned length or schedule), or a schedule.
+const overtimeApplies = (config) => FORMATS[config.format]?.kind === 'flat' || config.mode === 'scheduled';
+
 function fillForm(config) {
   $('f-name').value = config.name || '';
   form.elements.format.value = config.format;
@@ -438,10 +455,13 @@ function fillForm(config) {
   form.elements.mode.value = config.mode;
 
   const schedule = { ...defaultConfig().schedule, ...config.schedule };
-  // A past session comes back with the same times on the next day they're still ahead.
+  // A past session comes back with the same times on the next day they're still ahead,
+  // unless it's the gig on the meter and it's still going in overtime.
   const now = Date.now();
   const savedDate = schedule.date;
-  for (let d = new Date(); buildSchedule(schedule).endMs <= now; d.setDate(d.getDate() + 1)) {
+  const live = config === session.config ? getStatus(session, now) : null;
+  const inOvertime = Boolean(live) && !live.stopped && (live.phase === 'overtime' || live.overtimeMs > 0);
+  for (let d = new Date(); !inOvertime && buildSchedule(schedule).endMs <= now; d.setDate(d.getDate() + 1)) {
     schedule.date = todayISO(d);
     if (d - now > 2 * 86400000) break;
   }
@@ -464,12 +484,15 @@ function fillForm(config) {
   $('f-end-at').value = timesShown.end;
   setText($('end-at-label'), end?.type === 'pause' ? 'Paused at' : 'Stopped at');
   form.elements.theme.value = themeOf(config);
+  $('f-extras').replaceChildren(...(Array.isArray(config.extras) ? config.extras : []).map(extraRow));
+  $('f-ot-on').checked = config.overtime?.on === true;
+  $('f-ot-rate').value = moneyText(config.overtime?.amountCents);
 }
 
 function readForm() {
   const hours = Math.max(0, Number($('f-hours').value) || 0);
   const minutes = Math.max(0, Number($('f-minutes').value) || 0);
-  return {
+  const config = {
     name: $('f-name').value.trim().slice(0, 40),
     format: form.elements.format.value,
     amountCents: parseMoney($('f-amount').value) ?? 0,
@@ -488,7 +511,16 @@ function readForm() {
     manualPause: $('f-pause').checked,
     decimals: Number(form.elements.decimals.value) || DEFAULT_DECIMALS,
     theme: themeOf({ theme: form.elements.theme.value }),
+    // A row left completely blank is ignored; one with a label but no amount is an error.
+    extras: [...$('f-extras').children]
+      .map((li) => ({ label: li.querySelector('.x-label').value.trim().slice(0, 30), text: li.querySelector('.x-amount').value.trim() }))
+      .filter((x) => x.label || x.text)
+      .map((x) => ({ label: x.label, amountCents: parseMoney(x.text) ?? 0 })),
+    overtime: { on: false, amountCents: parseMoney($('f-ot-rate').value) ?? 0 },
   };
+  config.overtime.on = $('f-ot-on').checked && overtimeApplies(config);
+  if (overtimeLocked(config)) config.overtime = session.config.overtime ?? { on: false, amountCents: 0 };
+  return config;
 }
 
 // Only changes to pay or timing start a fresh meter; a new name, look, decimal places
@@ -520,6 +552,15 @@ function asSaved(config) {
 function saveRestarts(config) {
   const rearm = config.mode === 'scheduled' && !session.scheduleArmed;
   return !hasSaved || newGigSetup || rearm || payKey(asSaved(config)) !== payKey(session.config);
+}
+
+// Once the gig on the meter is past its planned end (in overtime, or finished), its
+// overtime setting is locked: switching it then would wake a finished gig or erase
+// overtime already earned. It unlocks when Save is going to start a fresh gig anyway.
+function overtimeLocked(config) {
+  if (saveRestarts(config)) return false;
+  const live = getStatus(session, Date.now());
+  return ['over', 'paid', 'overtime'].includes(live.phase) || live.overtimeMs > 0;
 }
 
 // "This gig" offers one of two things. For a gig that hasn't started (or that Save will
@@ -563,7 +604,8 @@ const timesChanged = (mode) => (mode === 'begin'
 function formError(config, now) {
   const error = validateConfig(config);
   if (error) return error;
-  if (config.mode === 'scheduled' && buildSchedule(config.schedule).endMs <= now) {
+  // Only a fresh start needs a schedule still ahead; a gig running on (overtime) can be edited.
+  if (config.mode === 'scheduled' && saveRestarts(config) && buildSchedule(config.schedule).endMs <= now) {
     return 'That session has already ended. Pick a later date or time.';
   }
   return null;
@@ -579,6 +621,18 @@ function updateForm(showErrors = false) {
   $('planned-field').hidden = !(format.kind === 'flat' && config.mode === 'manual');
   $('schedule-fields').hidden = config.mode !== 'scheduled';
   $('breaks-area').hidden = !config.schedule.breaksOn;
+  $('ot-field').hidden = !overtimeApplies(config);
+  const otLocked = overtimeLocked(config);
+  if (otLocked) {
+    $('f-ot-on').checked = config.overtime.on;
+    $('f-ot-rate').value = moneyText(config.overtime.amountCents);
+  }
+  $('f-ot-on').disabled = otLocked;
+  $('f-ot-rate').disabled = otLocked;
+  $('ot-rate-wrap').hidden = !$('f-ot-on').checked;
+  setText($('ot-hint'), otLocked
+    ? 'This gig is past its planned end, so its overtime can’t be changed now. Tap Stop to end it.'
+    : 'When the planned work is done, the meter keeps going at this rate until you tap Stop.');
 
   const mode = timesMode(config);
   $('times-field').hidden = !mode;
@@ -857,6 +911,13 @@ function addBreak() {
 
 $('clear-begin').addEventListener('click', () => {
   $('f-begin-at').value = '';
+  updateForm();
+});
+
+$('add-extra').addEventListener('click', () => {
+  const row = extraRow();
+  $('f-extras').append(row);
+  row.querySelector('.x-label').focus();
   updateForm();
 });
 

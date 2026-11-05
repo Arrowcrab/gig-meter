@@ -26,13 +26,13 @@ export const UNITS = {
 
 export const STATUS_TEXT = {
   idle: 'Ready', waiting: 'Scheduled', running: 'Running', paused: 'Paused',
-  break: 'On break', over: 'Session over', paid: 'Paid in full',
+  break: 'On break', over: 'Session over', paid: 'Paid in full', overtime: 'Overtime',
 };
 
 // The Fare meter's roof-lamp wording.
 const LAMP_TEXT = {
   idle: 'Off the clock', waiting: 'Scheduled', running: 'On the clock', paused: 'Paused',
-  break: 'On break', over: 'Off the clock', paid: 'Paid in full',
+  break: 'On break', over: 'Off the clock', paid: 'Paid in full', overtime: 'Overtime',
 };
 
 const PAY_LABEL = {
@@ -40,7 +40,7 @@ const PAY_LABEL = {
   minute: 'Per minute', weekly: 'Weekly salary', yearly: 'Yearly salary',
 };
 const PAY_SUFFIX = { hourly: '/hr', minute: '/min', weekly: '/wk', yearly: '/yr' };
-const LOG_TEXT = { start: 'Started', resume: 'Resumed', pause: 'Paused', break: 'Break', back: 'Back', end: 'Ended', stop: 'Stopped', paid: 'Paid in full' };
+const LOG_TEXT = { start: 'Started', resume: 'Resumed', pause: 'Paused', break: 'Break', back: 'Back', end: 'Ended', stop: 'Stopped', paid: 'Paid in full', overtime: 'Overtime' };
 
 // The big button's label and what it does. With the Pause button switched off (the
 // default) a gig goes Start → Stop → New gig, and a scheduled break ends on its own.
@@ -48,16 +48,16 @@ const LOG_TEXT = { start: 'Started', resume: 'Resumed', pause: 'Paused', break: 
 function mainButton(phase, pauseOn, stopped) {
   if (phase === 'paid') return ['New gig', 'newGig'];
   if (phase === 'over') return stopped || !pauseOn ? ['New gig', 'newGig'] : ['Resume', 'toggle'];
-  if (phase === 'running') return pauseOn ? ['Pause', 'toggle'] : ['Stop', 'stop'];
+  if (phase === 'running' || phase === 'overtime') return pauseOn ? ['Pause', 'toggle'] : ['Stop', 'stop'];
   if (phase === 'break') return pauseOn ? ['Resume', 'toggle'] : ['', 'none'];
   if (phase === 'idle') return ['Start', 'toggle'];
   if (phase === 'waiting') return ['Start now', 'toggle'];
   return ['Resume', 'toggle'];
 }
-const NEXT_TEXT = { start: 'Starts at', break: 'Break at', breakEnd: 'Back at', end: 'Ends at' };
-const NEXT_SHORT = { start: 'Starts in', break: 'Break in', breakEnd: 'Back in', end: 'Ends in' };
-const NEXT_ROW = { start: 'Starts', break: 'Next break', breakEnd: 'Back at', end: 'Ends' };
-const NEXT_WORD = { start: 'start', break: 'break', breakEnd: 'back', end: 'end' };
+const NEXT_TEXT = { start: 'Starts at', break: 'Break at', breakEnd: 'Back at', end: 'Ends at', overtime: 'Overtime at' };
+const NEXT_SHORT = { start: 'Starts in', break: 'Break in', breakEnd: 'Back in', end: 'Ends in', overtime: 'Overtime in' };
+const NEXT_ROW = { start: 'Starts', break: 'Next break', breakEnd: 'Back at', end: 'Ends', overtime: 'Overtime' };
+const NEXT_WORD = { start: 'start', break: 'break', breakEnd: 'back', end: 'end', overtime: 'overtime' };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const LOG_LINES = 6;
@@ -95,6 +95,8 @@ export function viewModel(session, status, now, decimals) {
   const scheduleOff = config.mode === 'scheduled' && !session.scheduleArmed && !paid && status.phase !== 'over';
   const [primary, primaryAction] = mainButton(status.phase, config.manualPause === true, status.stopped);
   const past = history(session, now);
+  // Extras are listed from the start (they're part of the deal); the total adds them once it begins.
+  const extrasCents = (Array.isArray(config.extras) ? config.extras : []).reduce((sum, x) => sum + (x?.amountCents > 0 ? x.amountCents : 0), 0);
 
   // The rate per minute to the nearest ten-thousandth, trailing zeros dropped: $1.40, $1.3125.
   const { amountCents, perMs } = status.payRate;
@@ -119,12 +121,23 @@ export function viewModel(session, status, now, decimals) {
     const paidAt = past.at(-1)?.t ?? now;
     next = {
       hasNext: true,
-      nextText: `All ${formatMoney(status.capCents)} earned`,
+      nextText: status.cents > status.capCents ? `${formatMoney(status.capCents)} fee earned in full` : `All ${formatMoney(status.capCents)} earned`,
       nextShortLabel: 'Finished',
       nextShortValue: clockTime(paidAt),
       nextRowLabel: 'Finished',
       nextRowValue: clockTime(paidAt),
       stubNext: '',
+    };
+  } else if (status.phase === 'overtime') {
+    const since = past.findLast((e) => e.kind === 'overtime')?.t ?? now;
+    next = {
+      hasNext: true,
+      nextText: `Overtime since ${clockLabel(since, now)}`,
+      nextShortLabel: 'Overtime since',
+      nextShortValue: clockTime(since),
+      nextRowLabel: 'Overtime since',
+      nextRowValue: clockTime(since),
+      stubNext: `Overtime since ${hm24(since)}`,
     };
   } else if (scheduleOff) {
     next = {
@@ -157,7 +170,12 @@ export function viewModel(session, status, now, decimals) {
     amount: formatAmount(unitsEarned(status, decimals), decimals),
     worked: formatClock(status.workedMs),
     isFlat,
-    owed: isFlat ? formatMoney(status.capCents - status.cents) : '',
+    owed: isFlat ? formatMoney(status.capCents - (status.baseCents ?? status.cents)) : '',
+    hasExtras: extrasCents > 0,
+    extras: formatMoney(extrasCents),
+    hasOvertime: status.overtimeMs > 0 || status.phase === 'overtime',
+    hasAddOns: extrasCents > 0 || status.overtimeMs > 0 || status.phase === 'overtime',
+    overtime: formatMoney(status.overtimeCents ?? 0),
     pct: `${Math.floor(progress * 100)}%`,
     ledLit: Math.floor(progress * 20),
     rateLong: `${perMinute} a minute`,

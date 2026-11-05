@@ -411,6 +411,7 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 .switch:checked { background: var(--accent); box-shadow: inset 0 0 0 1px var(--select); }
 .switch:checked::before { transform: translateX(20px); }
 .switch:focus-visible { outline: 2px solid var(--select); outline-offset: 2px; }
+.switch:disabled, .money-input:has(input:disabled) { opacity: 0.45; cursor: default; }
 .breaks-area { display: flex; flex-direction: column; gap: 8px; }
 
 /* "This gig": correcting when it started or stopped. */
@@ -445,6 +446,14 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
   font-size: 15px;
 }
 #save-gig.done { border-style: solid; border-color: var(--select); }
+
+/* Extras (label, amount, ×) and the overtime rate: smaller money boxes than Pay. */
+.extras { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.extras:empty { display: none; }
+.extra-row { display: grid; grid-template-columns: minmax(0, 1fr) 112px 44px; align-items: center; gap: 8px; }
+.extra-row .money-input, .ot-rate { padding: 0 12px; }
+.extra-row .money-input .prefix, .extra-row .money-input input, .ot-rate .prefix, .ot-rate input { font-size: 17px; }
+.extra-row .money-input input, .ot-rate input { padding: 12px 0; }
 .hint.error { color: var(--danger); }
 
 /* Saved gigs: tap a row to fill in Setup with it; × then "Remove" deletes it. The row
@@ -527,6 +536,7 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 .quiet { gap: 14px; padding-top: calc(env(safe-area-inset-top) + 8px); }
 body { --q-state: var(--q-idle); }
 body[data-phase="running"],
+body[data-phase="overtime"],
 body[data-phase="paid"] { --q-state: var(--q-run); }
 body[data-phase="break"] { --q-state: var(--q-break); }
 
@@ -575,7 +585,7 @@ body[data-phase="paid"] .q-check { display: block; }
   text-transform: uppercase;
   transition: background-color 0.2s, color 0.2s;
 }
-body[data-phase="running"] .f-lamp, body[data-phase="paid"] .f-lamp { background: #FFB21A; color: #1E1405; }
+body[data-phase="running"] .f-lamp, body[data-phase="overtime"] .f-lamp, body[data-phase="paid"] .f-lamp { background: #FFB21A; color: #1E1405; }
 .f-head h1 { font-size: 24px; font-weight: 600; }
 .f-head p { margin-top: 2px; font-size: 17px; font-weight: 500; color: #ADA699; }
 .f-window { display: flex; flex-direction: column; gap: 14px; padding: 16px 16px 14px; border-radius: 10px; background: #0B0907; box-shadow: inset 0 3px 0 #000000, 0 1px 0 #34312C; }

@@ -48,6 +48,8 @@
     </section>
     <section class="q-list">
       <div class="q-row" data-show="isFlat"><span>Still owed</span><span data-bind="owed"></span></div>
+      <div class="q-row" data-show="hasExtras"><span>Extras</span><span data-bind="extras"></span></div>
+      <div class="q-row" data-show="hasOvertime"><span>Overtime</span><span data-bind="overtime"></span></div>
       <div class="q-row" data-show="hasNext"><span data-bind="nextRowLabel"></span><span data-bind="nextRowValue"></span></div>
       <div class="q-row"><span>Rate</span><span data-bind="rateLong"></span></div>
     </section>
@@ -82,6 +84,10 @@
         <div><span class="f-legend">Time</span><span class="f-val" data-bind="worked"></span></div>
         <div class="f-right" data-show="isFlat"><span class="f-legend">Still owed</span><span class="f-val" data-bind="owed"></span></div>
       </div>
+      <div class="f-pair" data-show="hasAddOns">
+        <div data-show="hasExtras"><span class="f-legend">Extras</span><span class="f-val" data-bind="extras"></span></div>
+        <div class="f-right" data-show="hasOvertime"><span class="f-legend">Overtime</span><span class="f-val" data-bind="overtime"></span></div>
+      </div>
     </section>
     <div class="f-ticker" data-show="hasNote" data-bind="note"></div>
     <div class="f-next" data-show="hasNext"><span class="f-next-label">Next</span><span data-bind="nextText"></span></div>
@@ -106,6 +112,8 @@
         <div class="s-line" data-show="isFlat"><span>Planned work</span><i></i><span data-bind="planned"></span></div>
         <div class="s-line"><span>Rate</span><i></i><span data-bind="rateLong"></span></div>
         <div class="s-line"><span>Worked</span><i></i><span data-bind="worked"></span></div>
+        <div class="s-line" data-show="hasExtras"><span>Extras</span><i></i><span data-bind="extras"></span></div>
+        <div class="s-line" data-show="hasOvertime"><span>Overtime</span><i></i><span data-bind="overtime"></span></div>
       </div>
       <div class="s-rule"></div>
       <div class="s-total">
@@ -140,6 +148,8 @@
     <div class="p-grid">
       <div class="p-cell"><span>Worked</span><b data-bind="worked"></b></div>
       <div class="p-cell" data-show="isFlat"><span>Still owed</span><b data-bind="owed"></b></div>
+      <div class="p-cell" data-show="hasExtras"><span>Extras</span><b data-bind="extras"></b></div>
+      <div class="p-cell" data-show="hasOvertime"><span>Overtime</span><b data-bind="overtime"></b></div>
       <div class="p-cell" data-show="hasNext"><span data-bind="nextShortLabel"></span><b data-bind="nextShortValue"></b></div>
       <div class="p-cell"><span>Rate</span><b data-bind="rateShort"></b></div>
     </div>
@@ -213,6 +223,13 @@
         <span class="hint" id="format-note" hidden></span>
       </label>
 
+      <div class="field">
+        <span class="label">Extras <em>optional</em></span>
+        <ul class="extras" id="f-extras"></ul>
+        <button type="button" class="add-break" id="add-extra">+ Add an extra</button>
+        <span class="hint">Add-ons like parking or cartage. They count in the total once the gig starts.</span>
+      </div>
+
       <fieldset class="field">
         <legend class="label">Timing</legend>
         <div class="segmented">
@@ -246,6 +263,16 @@
             <button type="button" class="add-break" id="add-break">+ Add a break</button>
           </div>
         </div>
+      </div>
+
+      <div class="field" id="ot-field">
+        <label class="switch-row"><span>Overtime <em>after the planned end</em></span><input type="checkbox" class="switch" id="f-ot-on" role="switch"></label>
+        <label class="money-input ot-rate" id="ot-rate-wrap" hidden>
+          <span class="prefix">$</span>
+          <input id="f-ot-rate" type="text" inputmode="decimal" placeholder="90" aria-label="Overtime pay per hour">
+          <span class="unit">per hour</span>
+        </label>
+        <span class="hint" id="ot-hint">When the planned work is done, the meter keeps going at this rate until you tap Stop.</span>
       </div>
 
       <div class="field">
@@ -315,6 +342,14 @@
       <input type="number" class="b-min" inputmode="numeric" min="1" max="240" aria-label="Break length in minutes">
       <span>min</span>
       <button type="button" class="remove" aria-label="Remove break">&times;</button>
+    </li>
+  </template>
+
+  <template id="extra-row">
+    <li class="extra-row">
+      <input type="text" class="x-label" maxlength="30" placeholder="Parking" aria-label="What the extra is for">
+      <span class="money-input"><span class="prefix">$</span><input type="text" class="x-amount" inputmode="decimal" placeholder="15" aria-label="Extra amount"></span>
+      <button type="button" class="remove" aria-label="Remove extra">&times;</button>
     </li>
   </template>
 
