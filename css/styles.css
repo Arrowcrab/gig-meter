@@ -498,12 +498,24 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 .total span { font-size: 13px; color: var(--muted); }
 .total b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text); }
 .history-list { display: flex; flex-direction: column; margin: 0 0 16px; padding: 0; list-style: none; }
-.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 60px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 60px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.h-open { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; }
+.h-open:active { opacity: 0.6; }
+.h-go { font-size: 22px; line-height: 1; color: var(--muted); }
 .h-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .h-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
 .h-sub { font-size: 13px; color: var(--muted); }
 .h-amount { font: 600 16px var(--font-num); font-variant-numeric: tabular-nums; }
 .history-row.now .h-sub { color: var(--q-run); }
+
+/* Receipt: the picture, then Share (or Save image where a browser can't share files). */
+.receipt-sheet { display: flex; flex-direction: column; }
+.receipt-frame { display: flex; justify-content: center; align-items: center; min-height: 240px; }
+.receipt-img { display: block; width: 100%; max-width: 390px; height: auto; border-radius: 8px; -webkit-touch-callout: default; }
+.receipt-wait { color: var(--muted); font-size: 15px; }
+.receipt-sheet #receipt-hint { display: block; margin: 12px 0 0; text-align: center; }
+.receipt-sheet #receipt-hint:empty { display: none; }
+.save:disabled { opacity: 0.5; }
 
 .sheet-foot {
   position: sticky;
@@ -541,6 +553,7 @@ body[data-phase="paid"] { --q-state: var(--q-run); }
 body[data-phase="break"] { --q-state: var(--q-break); }
 
 .q-top { display: flex; justify-content: flex-end; }
+.q-receipt { margin-right: auto; }
 .q-link { min-height: 44px; padding: 0 4px; border: none; background: none; color: var(--link); font-size: 17px; }
 .q-head { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
 .q-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
@@ -639,7 +652,12 @@ body[data-phase="running"] .f-lamp, body[data-phase="overtime"] .f-lamp, body[da
 /* ---------- Pay stub: a printed receipt ---------- */
 
 .stub { padding-top: calc(env(safe-area-inset-top) + 12px); font-family: "IBM Plex Mono", "Courier New", monospace; }
-.s-paper { display: flex; flex-direction: column; gap: 12px; padding: 22px 20px 18px; background: #F3EFE6; color: #23201B; font-size: 14px; line-height: 1.45; }
+.s-paper { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 22px 20px 18px; background: #F3EFE6; color: #23201B; font-size: 14px; line-height: 1.45; }
+/* Tucked into the paper's top corner, beside GIG METER, so it costs no height. Its
+   tap area reaches past the visible edge to a full 44 points. */
+.s-receipt { position: absolute; top: 8px; right: 10px; min-height: 28px; padding: 0 10px; border: 1.5px solid #8C867C; border-radius: 3px; background: transparent; color: #23201B; font: 500 13px "IBM Plex Mono", "Courier New", monospace; }
+.s-receipt::before { content: ""; position: absolute; inset: -8px -6px; }
+.s-receipt:active { background: #E6E0D4; }
 .s-edge {
   height: 10px;
   background:
@@ -702,6 +720,7 @@ body[data-phase="paid"] .s-stamp { display: block; animation: stamp 0.35s cubic-
 body[data-phase="paid"] .poster { --ink: #FF6B1A; }
 .p-top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 2px solid var(--ink); }
 .p-mark { font-size: 18px; font-weight: 800; }
+.p-links { display: flex; gap: 18px; }
 .p-link { min-height: 44px; padding: 0 2px; border: none; background: none; color: var(--ink); font-size: 17px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
 .p-head { display: flex; flex-direction: column; gap: 6px; }
 .p-status { font-size: 46px; font-weight: 900; font-stretch: 80%; line-height: 0.95; letter-spacing: -0.01em; }

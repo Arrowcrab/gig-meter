@@ -21,7 +21,7 @@ import {
   THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong,
   savedTitle, savedSummary, upsertSaved, removeSaved, matchSaved, readSaved,
   historyEntry, addHistory, removeHistory, readHistory, historyTotals, historyRow,
-  wantsInstallHint,
+  wantsInstallHint, receipt, receiptText, receiptFileName, gigFinished,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -160,6 +160,9 @@ function loadFonts(theme) {
   link.rel = 'stylesheet';
   link.crossOrigin = 'anonymous'; // lets the offline copy see whether the request worked
   link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
+  const settled = () => { link.dataset.settled = 'true'; };
+  link.addEventListener('load', settled, { once: true });
+  link.addEventListener('error', settled, { once: true });
   document.head.append(link);
   fontLinks[theme] = link;
 }
@@ -395,6 +398,10 @@ document.addEventListener('click', (e) => {
   if (action === 'setup') openSetup();
   else if (action === 'primary') pressPrimary();
   else if (action === 'reset') pressReset();
+  else if (action === 'receipt') {
+    const now = Date.now();
+    openReceipt(historyEntry(session, now, 'current'), !gigFinished(getStatus(session, now)));
+  }
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -779,6 +786,11 @@ function historyItem(entry, now, isCurrent) {
   setText(li.querySelector('.h-title'), row.title);
   setText(li.querySelector('.h-sub'), isCurrent ? `Current gig · ${row.sub}` : row.sub);
   setText(li.querySelector('.h-amount'), row.amount);
+  li.querySelector('.h-open').addEventListener('click', () => {
+    if (!isCurrent) return openReceipt(entry, false);
+    const at = Date.now(); // the current gig may have earned more since the list was drawn
+    openReceipt(historyEntry(session, at, 'current') ?? entry, !gigFinished(getStatus(session, at)));
+  });
   const remove = li.querySelector('.remove');
   if (isCurrent) {
     li.classList.add('now');
@@ -803,6 +815,274 @@ $('open-history').addEventListener('click', () => {
 $('close-history').addEventListener('click', closeHistory);
 $('history').addEventListener('click', (e) => {
   if (e.target === $('history')) closeHistory();
+});
+
+// ---------- receipt ----------
+
+// Always printed in the Pay stub's colors and type, whatever look is on.
+const PRINT = { desk: '#2B2A27', paper: '#F3EFE6', ink: '#23201B', dim: '#5D584F', rule: '#8C867C', dots: '#9C968B', stamp: '#B3311B' };
+const MONO = '"IBM Plex Mono", "Courier New", monospace';
+const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+// The Pay stub's typeface, fetched if this phone hasn't used that look yet. With no
+// connection and no saved copy, the receipt prints in Courier instead.
+async function receiptFonts(text) {
+  loadFonts('stub');
+  const link = fontLinks.stub;
+  if (!link.dataset.settled) {
+    await Promise.race([
+      new Promise((resolve) => { link.addEventListener('load', resolve, { once: true }); link.addEventListener('error', resolve, { once: true }); }),
+      wait(3000),
+    ]);
+  }
+  try {
+    await Promise.race([Promise.all([400, 500, 600, 700].map((w) => document.fonts.load(`${w} 16px "IBM Plex Mono"`, text))), wait(3000)]);
+  } catch {
+    // prints with the fallback
+  }
+}
+
+// Shorten text with "…" until it fits.
+function fitText(g, text, max) {
+  if (g.measureText(text).width <= max) return text;
+  const chars = [...text];
+  while (chars.length && g.measureText(`${chars.join('').trimEnd()}…`).width > max) chars.pop();
+  return `${chars.join('').trimEnd()}…`;
+}
+
+function wrapText(g, text, max, maxLines) {
+  const lines = [];
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const joined = lines.length ? `${lines.at(-1)} ${word}` : word;
+    if (lines.length && g.measureText(joined).width <= max) lines[lines.length - 1] = joined;
+    else lines.push(word);
+  }
+  const kept = lines.slice(0, maxLines);
+  if (lines.length > maxLines) kept[maxLines - 1] += ` ${lines.slice(maxLines).join(' ')}`;
+  return kept.map((line) => fitText(g, line, max));
+}
+
+// The receipt as a picture: paper on the Pay stub's dark desk, torn along the bottom,
+// drawn at three times screen size so it stays sharp when zoomed or printed.
+function drawReceipt(r) {
+  const W = 390;
+  const DESK = 16;
+  const PAD = 22;
+  const SCALE = 3;
+  const left = DESK + PAD;
+  const right = W - DESK - PAD;
+  const inner = right - left;
+  const canvas = document.createElement('canvas');
+  const g = canvas.getContext('2d');
+  let y = 0;
+  let drawing = false;
+
+  const font = (weight, size) => { g.font = `${weight} ${size}px ${MONO}`; };
+  const put = (text, x, height, { color = PRINT.ink, align = 'left' } = {}) => {
+    if (!drawing) return;
+    g.fillStyle = color;
+    g.textAlign = align;
+    g.textBaseline = 'middle';
+    g.fillText(text, x, y + height / 2);
+  };
+  const say = (text, x, height, options) => {
+    put(text, x, height, options);
+    y += height;
+  };
+  const rule = () => {
+    y += 12;
+    if (drawing) {
+      g.strokeStyle = PRINT.rule;
+      g.lineWidth = 1.5;
+      g.setLineDash([4, 3]);
+      g.beginPath();
+      g.moveTo(left, y);
+      g.lineTo(right, y);
+      g.stroke();
+      g.setLineDash([]);
+    }
+    y += 12;
+  };
+  const row = ([label, value]) => {
+    font(400, 14);
+    const valueWidth = g.measureText(value).width;
+    const shown = fitText(g, label, inner - valueWidth - 18);
+    if (drawing) {
+      const from = left + g.measureText(shown).width + 6;
+      const to = right - valueWidth - 6;
+      g.fillStyle = PRINT.dots;
+      for (let x = from; x + 1.5 <= to; x += 4) g.fillRect(x, y + 14, 1.5, 1.5);
+    }
+    put(value, right, 21, { align: 'right' });
+    say(shown, left, 21);
+  };
+
+  const layout = () => {
+    y = DESK + PAD;
+    font(700, 16);
+    say('GIG METER', W / 2, 22, { align: 'center' });
+    if (r.title) {
+      font(500, 14);
+      for (const line of wrapText(g, r.title, inner, 3)) say(line, W / 2, 20, { align: 'center' });
+    }
+    font(400, 14);
+    say(r.date, W / 2, 20, { color: PRINT.dim, align: 'center' });
+    rule();
+    r.rows.forEach(row);
+    if (r.money.length) {
+      rule();
+      r.money.forEach(row);
+    }
+    rule();
+    font(600, 14);
+    say(r.totalLabel, left, 20);
+    font(600, 44);
+    const size = Math.min(44, Math.floor((44 * inner) / g.measureText(r.total).width));
+    font(600, size);
+    say(r.total, left, Math.round(size * 1.2) + 4);
+    if (r.stamp) {
+      y += 14;
+      if (drawing) {
+        font(700, 22);
+        const w = g.measureText('PAID IN FULL').width + 28;
+        g.save();
+        g.translate(W / 2, y + 22);
+        g.rotate((-6 * Math.PI) / 180);
+        g.globalAlpha = 0.9;
+        g.strokeStyle = PRINT.stamp;
+        g.lineWidth = 3;
+        g.beginPath();
+        if (g.roundRect) g.roundRect(-w / 2, -21, w, 42, 4);
+        else g.rect(-w / 2, -21, w, 42);
+        g.stroke();
+        g.fillStyle = PRINT.stamp;
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText('PAID IN FULL', 0, 1);
+        g.restore();
+      }
+      y += 54;
+    }
+    y += PAD - 4;
+  };
+
+  layout(); // measure
+  const bottom = y;
+  const height = Math.ceil(bottom + 8 + DESK);
+  canvas.width = W * SCALE;
+  canvas.height = height * SCALE;
+  g.scale(SCALE, SCALE);
+  g.fillStyle = PRINT.desk;
+  g.fillRect(0, 0, W, height);
+  // The paper, with a torn (zigzag) bottom edge like the Pay stub look's.
+  const teeth = Math.round((W - 2 * DESK) / 14);
+  const step = (W - 2 * DESK) / teeth;
+  g.fillStyle = PRINT.paper;
+  g.beginPath();
+  g.moveTo(DESK, DESK);
+  g.lineTo(W - DESK, DESK);
+  g.lineTo(W - DESK, bottom);
+  for (let i = teeth; i > 0; i -= 1) {
+    const x = DESK + i * step;
+    g.lineTo(x - step / 2, bottom + 7);
+    g.lineTo(x - step, bottom);
+  }
+  g.closePath();
+  g.fill();
+  drawing = true;
+  layout();
+  return canvas;
+}
+
+const receiptView = { token: 0, url: '', file: null };
+
+const canShareFile = (file) => {
+  try {
+    return Boolean(navigator.canShare?.({ files: [file] }));
+  } catch {
+    return false;
+  }
+};
+
+// Drops the last picture; also stops one still being printed from showing up.
+function clearReceipt() {
+  receiptView.token += 1;
+  if (receiptView.url) URL.revokeObjectURL(receiptView.url);
+  Object.assign(receiptView, { url: '', file: null });
+}
+
+function closeReceipt() {
+  $('receipt').hidden = true;
+  clearReceipt();
+  if (reloadWhenSetupCloses && $('setup').hidden) location.reload();
+}
+
+// The picture is made as the sheet opens, so it's ready before Share is tapped: the
+// phone only opens its share menu straight from a tap.
+async function openReceipt(entry, live) {
+  if (!entry) return;
+  clearReceipt();
+  const token = receiptView.token;
+  const r = receipt(entry, Date.now(), live);
+  const text = receiptText(r);
+  const img = $('receipt-img');
+  img.hidden = true;
+  img.removeAttribute('src');
+  img.alt = text;
+  setText($('receipt-wait'), 'Printing…');
+  $('receipt-wait').hidden = false;
+  setText($('receipt-hint'), '');
+  $('share-receipt').disabled = true;
+  setText($('share-receipt'), 'Share…');
+  $('receipt').hidden = false;
+  $('receipt').querySelector('.sheet').scrollTop = 0;
+
+  await receiptFonts(text);
+  if (token !== receiptView.token) return;
+  let blob = null;
+  try {
+    const canvas = drawReceipt(r);
+    blob = await new Promise((resolve) => { canvas.toBlob(resolve, 'image/png'); });
+    canvas.width = 0; // let go of the drawing memory now (iPhones limit it)
+    canvas.height = 0;
+  } catch {
+    blob = null;
+  }
+  if (token !== receiptView.token) return;
+  if (!blob) {
+    setText($('receipt-wait'), 'Couldn’t print the receipt.');
+    return;
+  }
+  receiptView.file = new File([blob], receiptFileName(entry), { type: 'image/png' });
+  receiptView.url = URL.createObjectURL(blob);
+  img.src = receiptView.url;
+  img.hidden = false;
+  $('receipt-wait').hidden = true;
+  const sharing = canShareFile(receiptView.file);
+  setText($('share-receipt'), sharing ? 'Share…' : 'Save image');
+  setText($('receipt-hint'), sharing ? 'Send it, or pick Save Image to keep it in Photos.' : '');
+  $('share-receipt').disabled = false;
+}
+
+$('share-receipt').addEventListener('click', async () => {
+  const { file, url } = receiptView;
+  if (!file) return;
+  if (!canShareFile(file)) {
+    const a = Object.assign(document.createElement('a'), { href: url, download: file.name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  try {
+    await navigator.share({ files: [file] });
+  } catch (err) {
+    if (err?.name !== 'AbortError') setText($('receipt-hint'), 'The share menu didn’t open. Press and hold the picture to save or share it.');
+  }
+});
+$('close-receipt').addEventListener('click', closeReceipt);
+$('receipt').addEventListener('click', (e) => {
+  if (e.target === $('receipt')) closeReceipt();
 });
 
 function renderSaved() {
@@ -981,7 +1261,7 @@ if ('serviceWorker' in navigator) {
   const hadController = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController) return; // first install, already running the current files
-    if ($('setup').hidden) location.reload();
+    if ($('setup').hidden && $('receipt').hidden) location.reload();
     else reloadWhenSetupCloses = true;
   });
   navigator.serviceWorker.register('sw.js').catch(() => {});

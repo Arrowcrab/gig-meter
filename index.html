@@ -32,7 +32,10 @@
 
   <!-- Quiet: native iPhone restraint -->
   <main class="face quiet" data-face="quiet" hidden>
-    <div class="q-top"><button class="q-link" type="button" data-action="setup">Setup</button></div>
+    <div class="q-top">
+      <button class="q-link q-receipt" type="button" data-action="receipt" data-show="hasReceipt">Receipt</button>
+      <button class="q-link" type="button" data-action="setup">Setup</button>
+    </div>
     <header class="q-head">
       <h1 class="q-title" data-bind="gigName"></h1>
       <p class="q-sub" data-bind="gigPay"></p>
@@ -65,6 +68,7 @@
   <main class="face fare" data-face="fare" hidden>
     <div class="f-top">
       <div class="f-lamp" data-bind="lamp"></div>
+      <button class="f-key f-key-small" type="button" data-action="receipt" data-show="hasReceipt">Receipt</button>
       <button class="f-key f-key-small" type="button" data-action="setup">Setup</button>
     </div>
     <header class="f-head">
@@ -101,6 +105,7 @@
   <!-- Pay stub: a printed receipt -->
   <main class="face stub" data-face="stub" hidden>
     <div class="s-paper">
+      <button class="s-receipt" type="button" data-action="receipt" data-show="hasReceipt">Receipt</button>
       <header class="s-head">
         <div class="s-brand">GIG METER</div>
         <div data-bind="gigName"></div>
@@ -138,7 +143,13 @@
 
   <!-- Poster: hi-vis big type -->
   <main class="face poster" data-face="poster" hidden>
-    <div class="p-top"><span class="p-mark">Gig Meter</span><button class="p-link" type="button" data-action="setup">Setup</button></div>
+    <div class="p-top">
+      <span class="p-mark">Gig Meter</span>
+      <span class="p-links">
+        <button class="p-link" type="button" data-action="receipt" data-show="hasReceipt">Receipt</button>
+        <button class="p-link" type="button" data-action="setup">Setup</button>
+      </span>
+    </div>
     <header class="p-head">
       <h1 class="p-status" data-bind="status"></h1>
       <p class="p-sub"><span data-bind="gigName"></span> · <span data-bind="payShort"></span></p>
@@ -332,7 +343,25 @@
       </div>
       <ul class="history-list" id="history-list"></ul>
       <p class="hint" id="history-empty">No gigs yet. A gig lands here, with what it earned, when you start a new one or reset the meter.</p>
-      <p class="hint">Weeks run Monday to Sunday. Each gig counts on the day it started.</p>
+      <p class="hint">Tap a gig for its receipt. Weeks run Monday to Sunday. Each gig counts on the day it started.</p>
+    </section>
+  </div>
+
+  <!-- Receipt: a gig's pay as a picture, to share or keep. Opened from the meter once a
+       gig is finished, or from any gig in History. -->
+  <div class="sheet-backdrop" id="receipt" hidden>
+    <section class="sheet receipt-sheet" aria-labelledby="receipt-title">
+      <header class="sheet-head">
+        <button type="button" class="link-btn" id="close-receipt">Done</button>
+        <h2 id="receipt-title">Receipt</h2>
+        <span></span>
+      </header>
+      <div class="receipt-frame">
+        <p class="receipt-wait" id="receipt-wait">Printing…</p>
+        <img class="receipt-img" id="receipt-img" alt="" hidden>
+      </div>
+      <p class="hint" id="receipt-hint"></p>
+      <footer class="sheet-foot"><button type="button" class="save" id="share-receipt" disabled>Share…</button></footer>
     </section>
   </div>
 
@@ -362,8 +391,11 @@
 
   <template id="history-row">
     <li class="history-row">
-      <span class="h-text"><span class="h-title"></span><span class="h-sub"></span></span>
-      <b class="h-amount"></b>
+      <button type="button" class="h-open">
+        <span class="h-text"><span class="h-title"></span><span class="h-sub"></span></span>
+        <b class="h-amount"></b>
+        <span class="h-go" aria-hidden="true">›</span>
+      </button>
       <button type="button" class="remove" aria-label="Remove from history">&times;</button>
     </li>
   </template>

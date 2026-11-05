@@ -88,6 +88,10 @@ const receiptDate = (ms) => {
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} · ${clockTime(ms)}`;
 };
 
+// A gig is over once it's Paid in full or the session is over; paused or on a break,
+// it's still going.
+export const gigFinished = (status) => status.phase === 'paid' || status.phase === 'over';
+
 export function viewModel(session, status, now, decimals) {
   const { config } = session;
   const isFlat = status.capCents != null;
@@ -192,6 +196,8 @@ export function viewModel(session, status, now, decimals) {
     totalLabel: paid ? 'TOTAL EARNED' : 'EARNED SO FAR',
     receiptDate: receiptDate(firstMoment),
     log: log.slice(-LOG_LINES),
+    // A shareable receipt is offered on the meter screen once the gig is done.
+    hasReceipt: gigFinished(status) && status.cents > 0,
   };
 }
 
@@ -256,7 +262,9 @@ export function readSaved(raw) {
 
 // ---------- earnings history ----------
 // Past gigs, newest first, each a frozen record of what it earned:
-// { id, title, pay, cents, workedMs, startedAt, endedAt }. Pure: the app stores it.
+// { id, title, pay, cents, workedMs, startedAt, endedAt, breakdown? }. Pure: the app
+// stores it. `breakdown` ({ baseCents, overtimeMs, extras: [{ label, cents }], feePaid })
+// is what the total is made of, for its receipt; records from before v16 have none.
 
 export const HISTORY_MAX = 500;
 
@@ -276,7 +284,31 @@ export function historyEntry(session, now, id) {
     workedMs: status.workedMs,
     startedAt: moments[0]?.t ?? Math.floor(now),
     endedAt: status.running || !last ? Math.floor(now) : last.t,
+    breakdown: {
+      baseCents: status.baseCents,
+      overtimeMs: status.overtimeMs ?? 0,
+      extras: status.extrasCents > 0
+        ? session.config.extras.filter((x) => x?.amountCents > 0).map((x) => ({ label: String(x.label ?? '').trim().slice(0, 30), cents: x.amountCents }))
+        : [],
+      feePaid: status.capCents != null && status.baseCents >= status.capCents,
+    },
   };
+}
+
+const extrasSum = (extras) => extras.reduce((sum, x) => sum + x.cents, 0);
+
+// A stored breakdown is kept only if it's sound and adds up to the record's total
+// (anything left over beyond base pay and extras is overtime).
+function readBreakdown(b, cents) {
+  if (!b || typeof b !== 'object') return null;
+  const { baseCents, overtimeMs, extras, feePaid } = b;
+  if (!Number.isSafeInteger(baseCents) || baseCents < 0) return null;
+  if (!Number.isFinite(overtimeMs) || overtimeMs < 0) return null;
+  if (typeof feePaid !== 'boolean') return null;
+  if (!Array.isArray(extras) || !extras.every((x) => x && typeof x.label === 'string' && Number.isSafeInteger(x.cents) && x.cents > 0)) return null;
+  const rest = cents - baseCents - extrasSum(extras);
+  if (rest < 0 || (rest > 0 && !(overtimeMs > 0))) return null;
+  return { baseCents, overtimeMs, extras: extras.map((x) => ({ label: x.label.slice(0, 30), cents: x.cents })), feePaid };
 }
 
 export const addHistory = (list, entry) => [entry, ...list].slice(0, HISTORY_MAX);
@@ -296,7 +328,8 @@ export function readHistory(raw) {
     if (!ok) continue;
     seen.add(e.id);
     const { id, title, pay, cents, workedMs, startedAt, endedAt } = e;
-    list.push({ id, title, pay, cents, workedMs, startedAt, endedAt });
+    const breakdown = readBreakdown(e.breakdown, cents);
+    list.push({ id, title, pay, cents, workedMs, startedAt, endedAt, ...(breakdown && { breakdown }) });
     if (list.length === HISTORY_MAX) break;
   }
   return list;
@@ -332,6 +365,61 @@ export function historyRow(entry, now) {
     sub: `${dayLabel(entry.startedAt, now)}, ${time12At(entry.startedAt)} · ${durationLong(entry.workedMs)}`,
     amount: formatMoney(entry.cents),
   };
+}
+
+// ---------- receipts ----------
+// A gig's receipt, from its history record: the words the app draws onto a picture
+// in the Pay stub style. `live` is a gig still running (its total so far).
+
+// An unnamed gig's title is its pay summary ("$60 per hour", "$210 per service · 7:00 PM–10:00 PM"),
+// already on the receipt.
+const namedTitle = (entry) => (entry.title === entry.pay || entry.title.startsWith(`${entry.pay} · `) ? '' : entry.title);
+const longDate = (ms) => { const d = new Date(ms); return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
+const shortDate = (ms) => { const d = new Date(ms); return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+
+export function receipt(entry, now, live = false) {
+  // A gig still going is "as of" now; a finished one ends at its last moment.
+  const end = live ? Math.floor(now) : entry.endedAt;
+  const sameDay = new Date(end).toDateString() === new Date(entry.startedAt).toDateString();
+  const endTime = sameDay ? time12At(end) : `${shortDate(end)}, ${time12At(end)}`;
+  const b = entry.breakdown;
+  const money = [];
+  if (b && (b.extras.length || b.overtimeMs > 0)) {
+    money.push(['Base pay', formatMoney(b.baseCents)]);
+    if (b.overtimeMs > 0) {
+      const label = b.overtimeMs >= 60000 ? `Overtime · ${durationLong(b.overtimeMs)}` : 'Overtime';
+      money.push([label, formatMoney(entry.cents - b.baseCents - extrasSum(b.extras))]);
+    }
+    for (const x of b.extras) money.push([x.label || 'Extra', formatMoney(x.cents)]);
+  }
+  return {
+    title: namedTitle(entry),
+    date: longDate(entry.startedAt),
+    rows: [['Pay', entry.pay], ['Started', time12At(entry.startedAt)], [live ? 'As of' : 'Finished', endTime], ['Worked', durationLong(entry.workedMs)]],
+    money,
+    totalLabel: live ? 'EARNED SO FAR' : 'TOTAL EARNED',
+    total: formatMoney(entry.cents),
+    stamp: !live && b?.feePaid === true,
+  };
+}
+
+// The same receipt as plain lines, read aloud in place of the picture.
+export function receiptText(r) {
+  return [
+    'GIG METER', r.title, r.date,
+    ...[...r.rows, ...r.money].map(([label, value]) => `${label}: ${value}`),
+    `${r.totalLabel}: ${r.total}`,
+    r.stamp ? 'PAID IN FULL' : '',
+  ].filter(Boolean).join('\n');
+}
+
+// "Saturday wedding receipt 2026-11-04.png": the gig's name with anything a file name
+// can't safely hold taken out.
+export function receiptFileName(entry) {
+  const cleaned = namedTitle(entry).replace(/[^\p{L}\p{M}\p{N} $'&,._-]/gu, '').replace(/\s+/g, ' ').replace(/^[.\s]+/, '').trim();
+  const name = [...cleaned].slice(0, 40).join('').trim(); // whole letters, never half of one
+  const d = new Date(entry.startedAt);
+  return `${name || 'Gig'} receipt ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.png`;
 }
 
 // ---------- Add to Home Screen hint ----------
