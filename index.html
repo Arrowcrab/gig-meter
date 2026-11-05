@@ -54,7 +54,7 @@
     <p class="q-caption" data-show="hasNote" data-bind="note"></p>
     <div class="spacer"></div>
     <footer class="q-actions">
-      <button class="q-primary" type="button" data-action="primary" data-bind="primary"></button>
+      <button class="q-primary" type="button" data-action="primary" data-bind="primary" data-show="hasPrimary"></button>
       <button class="q-reset" type="button" data-action="reset" data-bind="resetLabel"></button>
     </footer>
   </main>
@@ -88,7 +88,7 @@
     <div class="spacer"></div>
     <footer class="f-actions">
       <button class="f-key" type="button" data-action="reset" data-bind="resetLabel"></button>
-      <button class="f-key f-key-primary" type="button" data-action="primary" data-bind="primary"></button>
+      <button class="f-key f-key-primary" type="button" data-action="primary" data-bind="primary" data-show="hasPrimary"></button>
     </footer>
   </main>
 
@@ -124,7 +124,7 @@
     <footer class="s-actions">
       <button class="s-btn" type="button" data-action="setup">Setup</button>
       <button class="s-btn s-btn-reset" type="button" data-action="reset" data-bind="resetLabel"></button>
-      <button class="s-btn s-btn-primary" type="button" data-action="primary" data-bind="primary"></button>
+      <button class="s-btn s-btn-primary" type="button" data-action="primary" data-bind="primary" data-show="hasPrimary"></button>
     </footer>
   </main>
 
@@ -147,7 +147,7 @@
     <div class="spacer"></div>
     <footer class="p-actions">
       <button class="p-btn" type="button" data-action="reset" data-bind="resetLabel"></button>
-      <button class="p-btn p-btn-primary" type="button" data-action="primary" data-bind="primary"></button>
+      <button class="p-btn p-btn-primary" type="button" data-action="primary" data-bind="primary" data-show="hasPrimary"></button>
     </footer>
   </main>
 
@@ -206,10 +206,17 @@
           <label class="field"><span class="label">Ends</span><input id="f-end" type="time"></label>
         </div>
         <div class="field">
-          <span class="label">Breaks <em>the meter pauses</em></span>
-          <ul class="breaks" id="f-breaks"></ul>
-          <button type="button" class="add-break" id="add-break">+ Add a break</button>
+          <label class="switch-row"><span>Unpaid breaks <em>the meter pauses</em></span><input type="checkbox" class="switch" id="f-breaks-on" role="switch"></label>
+          <div class="breaks-area" id="breaks-area" hidden>
+            <ul class="breaks" id="f-breaks"></ul>
+            <button type="button" class="add-break" id="add-break">+ Add a break</button>
+          </div>
         </div>
+      </div>
+
+      <div class="field">
+        <label class="switch-row"><span>Pause button</span><input type="checkbox" class="switch" id="f-pause" role="switch"></label>
+        <span class="hint">Adds Pause and Resume. Without it, the button ends the gig with Stop. For unpaid breaks, a schedule with breaks is more exact.</span>
       </div>
 
       <fieldset class="field look-field">

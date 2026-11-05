@@ -11,6 +11,7 @@ import {
   getStatus,
   toggle,
   reset,
+  stop,
 } from './meter.js';
 import { THEMES, DEFAULT_THEME, themeOf, viewModel, UNITS, durationLong } from './view.js';
 
@@ -24,6 +25,7 @@ const faces = Object.fromEntries([...document.querySelectorAll('[data-face]')].m
 const view = { theme: null, parts: null, phase: null, cents: -1, dollars: null, fitKey: '', logKey: '', led: -1 };
 const loop = { raf: 0, timer: 0 };
 let resetConfirmUntil = 0;
+let stopConfirmUntil = 0;
 let saveConfirmUntil = 0;
 let reloadWhenSetupCloses = false;
 let rolledDate = null; // { saved, shown } when Setup moved an ended session's date forward
@@ -63,7 +65,8 @@ function defaultConfig() {
     amountCents: 0,
     plannedMinutes: 180,
     mode: 'manual',
-    schedule: { date: todayISO(start), start: hhmm(start), end: addToTime(hhmm(start), 180), breaks: [] },
+    schedule: { date: todayISO(start), start: hhmm(start), end: addToTime(hhmm(start), 180), breaksOn: false, breaks: [] },
+    manualPause: false,
     decimals: DEFAULT_DECIMALS,
     theme: DEFAULT_THEME,
   };
@@ -75,7 +78,7 @@ function load() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
     if (!data || !Array.isArray(data.events) || validateConfig(data.config)) return null;
-    const events = data.events.filter((e) => Number.isFinite(e?.t) && (e.type === 'resume' || e.type === 'pause'));
+    const events = data.events.filter((e) => Number.isFinite(e?.t) && ['resume', 'pause', 'stop'].includes(e.type));
     return { config: data.config, events, scheduleArmed: Boolean(data.scheduleArmed) };
   } catch {
     return null;
@@ -134,6 +137,7 @@ function applyTheme(theme) {
     log: face.querySelector('[data-log]'),
     leds: [...face.querySelectorAll('.f-led')],
     resets: [...face.querySelectorAll('[data-action="reset"]')],
+    primaries: [...face.querySelectorAll('[data-action="primary"]')],
   };
   Object.assign(view, { cents: -1, fitKey: '', logKey: '', logClock: null, led: -1 });
   syncTopBar();
@@ -232,11 +236,14 @@ function render(now) {
   const vm = viewModel(session, status, now, decimals);
   const confirming = now < resetConfirmUntil;
   vm.resetLabel = confirming ? 'Sure?' : status.phase === 'waiting' ? 'Cancel' : 'Reset';
+  const confirmingStop = vm.primaryAction === 'stop' && now < stopConfirmUntil;
+  if (confirmingStop) vm.primary = 'Sure?';
   applyView(vm);
   for (const button of view.parts.resets) {
     button.disabled = status.phase === 'idle';
     button.classList.toggle('confirm', confirming);
   }
+  for (const button of view.parts.primaries) button.classList.toggle('confirm', confirmingStop);
   fitAmount(status, decimals);
   renderCents(status);
   renderLog(vm.log, status.running);
@@ -289,10 +296,25 @@ async function syncWakeLock() {
 
 // ---------- meter controls (every look's buttons) ----------
 
+// The big button does whatever this look and setting show on it: start or resume,
+// pause, stop (after a "Sure?", since it can't be undone), or set up a new gig.
 function pressPrimary() {
   const now = Date.now();
-  if (getStatus(session, now).phase === 'paid') return openSetup({ newGig: true });
-  session = toggle(session, now);
+  const status = getStatus(session, now);
+  const { primaryAction } = viewModel(session, status, now, decimalsOf(session.config));
+  if (primaryAction === 'newGig') return openSetup({ newGig: true });
+  if (primaryAction === 'stop') {
+    if (now >= stopConfirmUntil) {
+      stopConfirmUntil = now + 3000;
+      return kick();
+    }
+    stopConfirmUntil = 0;
+    session = stop(session, now);
+  } else if (primaryAction === 'toggle') {
+    session = toggle(session, now);
+  } else {
+    return;
+  }
   persist();
   kick();
 }
@@ -305,6 +327,7 @@ function pressReset() {
     return kick();
   }
   resetConfirmUntil = 0;
+  stopConfirmUntil = 0;
   session = reset(session);
   persist();
   kick();
@@ -372,6 +395,10 @@ function fillForm(config) {
   $('f-end').value = schedule.end;
   const breaks = Array.isArray(schedule.breaks) ? schedule.breaks : [];
   $('f-breaks').replaceChildren(...breaks.map(breakRow));
+  // Gigs saved before the switch existed have breaks on exactly when they listed any.
+  // (Read the saved gig's own value: the defaults merged into `schedule` say off.)
+  $('f-breaks-on').checked = config.schedule?.breaksOn ?? breaks.length > 0;
+  $('f-pause').checked = config.manualPause === true;
   form.elements.decimals.value = String(decimalsOf(config));
   form.elements.theme.value = themeOf(config);
 }
@@ -389,27 +416,32 @@ function readForm() {
       date: $('f-date').value,
       start: $('f-start').value,
       end: $('f-end').value,
+      breaksOn: $('f-breaks-on').checked,
       breaks: [...$('f-breaks').children].map((li) => ({
         start: li.querySelector('.b-start').value,
         minutes: Number(li.querySelector('.b-min').value),
       })),
     },
+    manualPause: $('f-pause').checked,
     decimals: Number(form.elements.decimals.value) || DEFAULT_DECIMALS,
     theme: themeOf({ theme: form.elements.theme.value }),
   };
 }
 
-// Only changes to pay or timing start a fresh meter; a new name, look or decimal
-// places keep it running. Fields that don't apply to the chosen setup are ignored.
+// Only changes to pay or timing start a fresh meter; a new name, look, decimal places
+// or Pause button setting keep it running. Fields that don't apply to the chosen setup
+// are ignored, and only breaks that count (unpaid breaks switched on) are compared.
 function payKey(config) {
   const flat = FORMATS[config.format]?.kind === 'flat';
   const scheduled = config.mode === 'scheduled';
+  const s = config.schedule || {};
+  const breaks = s.breaksOn === false ? [] : (s.breaks || []).map((b) => [b.start, Number(b.minutes)]);
   return JSON.stringify([
     config.format,
     config.amountCents,
     config.mode,
     !scheduled && flat ? config.plannedMinutes : null,
-    scheduled ? config.schedule : null,
+    scheduled ? [s.date, s.start, s.end, breaks] : null,
   ]);
 }
 
@@ -445,6 +477,7 @@ function updateForm(showErrors = false) {
   setText($('format-note'), format.note || '');
   $('planned-field').hidden = !(format.kind === 'flat' && config.mode === 'manual');
   $('schedule-fields').hidden = config.mode !== 'scheduled';
+  $('breaks-area').hidden = !config.schedule.breaksOn;
 
   const summary = $('summary');
   const error = formError(config, now);
@@ -501,6 +534,8 @@ form.addEventListener('change', (e) => {
     $('setup').classList.add('peek');
     kick();
   }
+  // Switching unpaid breaks on with none listed starts you off with one.
+  if (e.target.id === 'f-breaks-on' && e.target.checked && !$('f-breaks').children.length) addBreak();
   updateForm();
 });
 
@@ -509,10 +544,14 @@ $('all-settings').addEventListener('click', () => {
   form.querySelector('.look-field').scrollIntoView({ block: 'center' });
 });
 
-$('add-break').addEventListener('click', () => {
+function addBreak() {
   const rows = [...$('f-breaks').children];
   const from = rows.length ? rows.at(-1).querySelector('.b-start').value : $('f-start').value;
   $('f-breaks').append(breakRow({ start: from ? addToTime(from, 60) : '', minutes: 10 }));
+}
+
+$('add-break').addEventListener('click', () => {
+  addBreak();
   updateForm();
 });
 
@@ -544,6 +583,7 @@ form.addEventListener('submit', (e) => {
     session = newSession(config);
     Object.assign(view, { phase: null, dollars: null });
     resetConfirmUntil = 0;
+    stopConfirmUntil = 0;
   } else {
     session = { ...session, config: asSaved(config) };
   }

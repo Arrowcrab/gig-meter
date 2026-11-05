@@ -35,7 +35,20 @@ const PAY_LABEL = {
   minute: 'Per minute', weekly: 'Weekly salary', yearly: 'Yearly salary',
 };
 const PAY_SUFFIX = { hourly: '/hr', minute: '/min', weekly: '/wk', yearly: '/yr' };
-const LOG_TEXT = { start: 'Started', resume: 'Resumed', pause: 'Paused', break: 'Break', back: 'Back', end: 'Ended', paid: 'Paid in full' };
+const LOG_TEXT = { start: 'Started', resume: 'Resumed', pause: 'Paused', break: 'Break', back: 'Back', end: 'Ended', stop: 'Stopped', paid: 'Paid in full' };
+
+// The big button's label and what it does. With the Pause button switched off (the
+// default) a gig goes Start → Stop → New gig, and a scheduled break ends on its own.
+// A gig paused before that setting existed can still be resumed.
+function mainButton(phase, pauseOn, stopped) {
+  if (phase === 'paid') return ['New gig', 'newGig'];
+  if (phase === 'over') return stopped || !pauseOn ? ['New gig', 'newGig'] : ['Resume', 'toggle'];
+  if (phase === 'running') return pauseOn ? ['Pause', 'toggle'] : ['Stop', 'stop'];
+  if (phase === 'break') return pauseOn ? ['Resume', 'toggle'] : ['', 'none'];
+  if (phase === 'idle') return ['Start', 'toggle'];
+  if (phase === 'waiting') return ['Start now', 'toggle'];
+  return ['Resume', 'toggle'];
+}
 const NEXT_TEXT = { start: 'Starts at', break: 'Break at', breakEnd: 'Back at', end: 'Ends at' };
 const NEXT_SHORT = { start: 'Starts in', break: 'Break in', breakEnd: 'Back in', end: 'Ends in' };
 const NEXT_ROW = { start: 'Starts', break: 'Next break', breakEnd: 'Back at', end: 'Ends' };
@@ -74,7 +87,8 @@ export function viewModel(session, status, now, decimals) {
   const { config } = session;
   const isFlat = status.capCents != null;
   const paid = status.phase === 'paid';
-  const scheduleOff = config.mode === 'scheduled' && !session.scheduleArmed && !paid;
+  const scheduleOff = config.mode === 'scheduled' && !session.scheduleArmed && !paid && status.phase !== 'over';
+  const [primary, primaryAction] = mainButton(status.phase, config.manualPause === true, status.stopped);
   const past = history(session, now);
 
   // The rate per minute to the nearest ten-thousandth, trailing zeros dropped: $1.40, $1.3125.
@@ -147,7 +161,9 @@ export function viewModel(session, status, now, decimals) {
     payValue: `${formatMoney(config.amountCents)}${PAY_SUFFIX[config.format] ?? ''}`,
     planned: isFlat ? formatClock(status.plannedMs) : '',
     ...next,
-    primary: { idle: 'Start', waiting: 'Start now', running: 'Pause', paid: 'New gig' }[status.phase] ?? 'Resume',
+    primary,
+    primaryAction,
+    hasPrimary: Boolean(primary),
     note,
     hasNote: Boolean(note),
     totalLabel: paid ? 'TOTAL EARNED' : 'EARNED SO FAR',

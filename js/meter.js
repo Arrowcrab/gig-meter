@@ -86,8 +86,11 @@ export function buildSchedule(schedule) {
   if (endMs === startMs) return { error: 'The end time has to be different from the start time.' };
   if (endMs < startMs) endMs = localMs(date, end, 1);
 
+  // Breaks count only when unpaid breaks are switched on. Gigs saved before that switch
+  // existed have no breaksOn at all and keep the breaks they had.
+  const listed = schedule.breaksOn === false ? [] : schedule.breaks || [];
   const breaks = [];
-  for (const [i, b] of (schedule.breaks || []).entries()) {
+  for (const [i, b] of listed.entries()) {
     const time = parseTime(b.start);
     if (!time) return { error: `Break ${i + 1} needs a start time.` };
     const minutes = Number(b.minutes);
@@ -167,14 +170,18 @@ function prepare(session) {
   const armed = Boolean(session.scheduleArmed && schedule);
   const rate = payRate(config, schedule);
   // On a tie, the manual tap comes second (sort is stable), so the user's tap wins.
-  const manual = session.events.map((e) => ({ t: e.t, run: e.type === 'resume', kind: 'manual' }));
-  const timeline = [...(armed ? scheduleEvents(schedule) : []), ...manual].sort((a, b) => a.t - b.t);
-  return { schedule, armed, rate, timeline };
+  const manual = session.events.map((e) => ({ t: e.t, run: e.type === 'resume', kind: e.type === 'stop' ? 'stop' : 'manual' }));
+  let timeline = [...(armed ? scheduleEvents(schedule) : []), ...manual].sort((a, b) => a.t - b.t);
+  // Stop is final: nothing after it, scheduled or tapped, counts.
+  const stopIndex = timeline.findIndex((e) => e.kind === 'stop');
+  const stopAt = stopIndex === -1 ? null : timeline[stopIndex].t;
+  if (stopIndex !== -1) timeline = timeline.slice(0, stopIndex + 1);
+  return { schedule, armed, rate, timeline, stopAt };
 }
 
 // What has happened so far, oldest first: every scheduled change or tap that actually
 // started or stopped the meter, then the moment a flat fee was paid in full (after
-// which nothing else matters). Kinds: start, resume, pause, break, back, end, paid.
+// which nothing else matters). Kinds: start, resume, pause, break, back, end, stop, paid.
 export function history(session, nowInput) {
   const now = Math.floor(nowInput);
   const { rate, timeline } = prepare(session);
@@ -193,6 +200,10 @@ export function history(session, nowInput) {
       return entries;
     }
     if (running) worked += e.t - since;
+    if (e.kind === 'stop') {
+      entries.push({ t: e.t, kind: 'stop' });
+      return entries;
+    }
     if (e.run !== running) {
       let kind;
       if (e.kind === 'manual' || e.kind === 'start') kind = e.run ? (started ? 'resume' : 'start') : 'pause';
@@ -209,8 +220,9 @@ export function history(session, nowInput) {
 
 export function getStatus(session, nowInput) {
   const now = Math.floor(nowInput);
-  const { schedule, armed, rate, timeline } = prepare(session);
+  const { schedule, armed, rate, timeline, stopAt } = prepare(session);
   const state = runState(timeline, now);
+  const stopped = stopAt != null && now >= stopAt;
 
   const workedMs = rate.capMs == null ? state.worked : Math.min(state.worked, rate.capMs);
   const earning = { amountCents: rate.amountCents, perMs: rate.perMs };
@@ -220,6 +232,7 @@ export function getStatus(session, nowInput) {
   let phase;
   if (paid) phase = 'paid';
   else if (state.running) phase = 'running';
+  else if (stopped) phase = 'over';
   else if (armed) {
     if (now < schedule.startMs && !session.events.some((e) => e.t <= now)) phase = 'waiting';
     else if (now >= schedule.endMs) phase = 'over';
@@ -229,7 +242,7 @@ export function getStatus(session, nowInput) {
 
   // The next scheduled change that will actually start or stop the meter. A scheduled
   // start is skipped if the user already started early, a break end if they never stopped.
-  const next = armed && !paid ? scheduleEvents(schedule).find((e) => e.t > now && e.run !== state.running) : null;
+  const next = armed && !paid && !stopped ? scheduleEvents(schedule).find((e) => e.t > now && e.run !== state.running) : null;
 
   return {
     phase,
@@ -243,7 +256,13 @@ export function getStatus(session, nowInput) {
     centsPerHour: rate.perMs > 0 ? (rate.amountCents * HOUR) / rate.perMs : 0,
     payRate: earning,
     schedule: armed ? schedule : null,
+    stopped,
   };
+}
+
+// Ends the gig for good, keeping the total. Used when the Pause button is switched off.
+export function stop(session, now) {
+  return { ...session, events: [...session.events, { t: Math.floor(now), type: 'stop' }] };
 }
 
 // The big button: pauses if running, otherwise starts or resumes.

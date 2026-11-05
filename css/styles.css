@@ -268,6 +268,54 @@ input::-webkit-date-and-time-value { text-align: left; }
 .peek .peek-back { display: inline-flex; align-items: center; }
 .peek .look-field { margin-bottom: 4px; }
 
+/* On/off switches (Unpaid breaks, Pause button). Each look sets its own off color. */
+body { --switch-off: #D1D1D6; }
+body[data-theme="fare"] { --switch-off: #45413B; }
+body[data-theme="stub"] { --switch-off: #C9C3B8; }
+body[data-theme="poster"] { --switch-off: #C8BFB2; }
+.switch-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius);
+  background: var(--field);
+  font-size: 16px;
+}
+.switch-row em { margin-left: 4px; font-style: normal; color: var(--muted); }
+.switch {
+  flex: none;
+  position: relative;
+  width: 51px;
+  height: 31px;
+  margin: 0;
+  border-radius: min(16px, calc(var(--radius) * 3));
+  background: var(--switch-off);
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 27px;
+  height: 27px;
+  border-radius: min(14px, calc(var(--radius) * 3));
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::before { transform: translateX(20px); }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.breaks-area { display: flex; flex-direction: column; gap: 8px; }
+
 .duration { display: flex; align-items: center; gap: 8px; }
 .duration input { width: 84px; text-align: center; }
 .duration span { margin-right: 8px; color: var(--muted); }
@@ -347,6 +395,7 @@ body[data-phase="paid"] .q-check { display: block; }
 .q-primary:active { filter: brightness(0.9); }
 .q-reset { min-height: 44px; border: none; background: none; color: #C4281C; font-size: 17px; }
 .q-reset.confirm { font-weight: 700; }
+.q-primary.confirm { background: #C4281C; }
 
 /* ---------- Fare meter: a taxi meter ---------- */
 
@@ -416,6 +465,7 @@ body[data-phase="running"] .f-lamp, body[data-phase="paid"] .f-lamp { background
 .f-key-small { flex: none; min-width: 78px; min-height: 44px; font-size: 18px; font-weight: 600; box-shadow: 0 3px 0 #0D0C0B; }
 .f-key-primary { flex: 2; background: #FFB21A; color: #1E1405; font-size: 26px; box-shadow: 0 5px 0 #8A5E00; }
 .f-key-primary:active { box-shadow: 0 2px 0 #8A5E00; }
+.f-key-primary.confirm { background: #FF8A6B; color: #1E1405; box-shadow: 0 5px 0 #A3482F; }
 
 /* ---------- Pay stub: a printed receipt ---------- */
 
@@ -474,6 +524,7 @@ body[data-phase="paid"] .s-stamp { display: block; animation: stamp 0.35s cubic-
 .s-btn-reset { flex: 1; }
 .s-btn-reset.confirm { border-color: #FFB4A3; color: #FFB4A3; }
 .s-btn-primary { flex: 1.6; border: none; background: #F3EFE6; color: #23201B; font-size: 17px; font-weight: 700; }
+.s-btn-primary.confirm { background: #FFB4A3; }
 .s-btn:active:not(:disabled) { filter: brightness(0.9); }
 
 /* ---------- Poster: hi-vis big type ---------- */
