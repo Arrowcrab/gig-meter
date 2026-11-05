@@ -265,6 +265,85 @@ export function stop(session, now) {
   return { ...session, events: [...session.events, { t: Math.floor(now), type: 'stop' }] };
 }
 
+// ---------- Fixing start and stop times ("I forgot to tap Start") ----------
+
+const atClock = (time, near) => {
+  const hm = parseTime(time);
+  if (!hm) return null;
+  const d = new Date(near);
+  d.setHours(hm[0], hm[1], 0, 0);
+  return d;
+};
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+// Correcting a time means the moment with that clock time nearest the one being
+// corrected, so 11:50 PM next to 12:10 AM is the evening before.
+export function nearestAt(time, near) {
+  const d = atClock(time, near);
+  if (!d) return null;
+  if (d.getTime() - near > 12 * HOUR) d.setDate(d.getDate() - 1);
+  else if (near - d.getTime() > 12 * HOUR) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+// The most recent moment at or before `now` with that clock time ("started at 7:00").
+export function latestAt(time, now) {
+  const d = atClock(time, now);
+  if (!d) return null;
+  if (d.getTime() > now) d.setDate(d.getDate() - 1);
+  return d.getTime();
+}
+
+// The taps that can be corrected: the Start that began the gig, and the Stop that ended
+// it (or, with the Pause button on, the latest Pause).
+export function editableTimes(session) {
+  const events = session.events;
+  const start = events[0]?.type === 'resume' ? events[0] : null;
+  let endIndex = events.findIndex((e) => e.type === 'stop');
+  if (endIndex === -1 && events.at(-1)?.type === 'pause') endIndex = events.length - 1;
+  return { start, end: endIndex === -1 ? null : events[endIndex], endIndex };
+}
+
+const tapWord = (type) => ({ stop: 'stop', pause: 'pause', resume: 'resume' })[type] ?? 'change';
+
+// Already working: start the meter from a past time today (or last night).
+export function startAt(session, time, now) {
+  const t = latestAt(time, now);
+  if (t == null) return { error: 'Pick the time you started.' };
+  if (now - t > 12 * HOUR) return { error: 'That’s more than 12 hours ago. Check the time.' };
+  return { session: { ...session, events: [{ t, type: 'resume' }] } };
+}
+
+export function setStartTime(session, time, now) {
+  const { start } = editableTimes(session);
+  if (!start) return { error: 'This gig’s start can’t be changed here.' };
+  const t = nearestAt(time, start.t);
+  if (t == null) return { error: 'Pick the time you started.' };
+  if (t > now) return { error: 'The start can’t be in the future.' };
+  const next = session.events[1];
+  if (next && t > next.t) return { error: `The start can’t be after the ${tapWord(next.type)} at ${clock(next.t)}.` };
+  return { session: { ...session, events: [{ ...start, t }, ...session.events.slice(1)] } };
+}
+
+export function setEndTime(session, time, now) {
+  const { end, endIndex } = editableTimes(session);
+  if (!end) return { error: 'This gig hasn’t been stopped.' };
+  const word = tapWord(end.type);
+  const t = nearestAt(time, end.t);
+  if (t == null) return { error: `Pick the time of the ${word}.` };
+  if (t > now) return { error: `The ${word} can’t be in the future.` };
+  const prev = session.events[endIndex - 1];
+  if (prev && t < prev.t) {
+    const what = endIndex - 1 === 0 && prev.type === 'resume' ? 'start' : tapWord(prev.type);
+    return { error: `The ${word} can’t be before the ${what} at ${clock(prev.t)}.` };
+  }
+  // A scheduled gig that started on its own has no Start tap; its start is the schedule's.
+  const begun = history({ ...session, events: session.events.slice(0, endIndex) }, now)[0];
+  if (!prev && begun && t < begun.t) return { error: `The ${word} can’t be before the gig started at ${clock(begun.t)}.` };
+  // Anything tapped after a Stop never counted, so it goes.
+  return { session: { ...session, events: [...session.events.slice(0, endIndex), { ...end, t }] } };
+}
+
 // The big button: pauses if running, otherwise starts or resumes.
 export function toggle(session, now) {
   const { running } = getStatus(session, now);

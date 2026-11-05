@@ -12,6 +12,10 @@ import {
   toggle,
   reset,
   stop,
+  editableTimes,
+  startAt,
+  setStartTime,
+  setEndTime,
 } from './meter.js';
 import { THEMES, DEFAULT_THEME, themeOf, viewModel, UNITS, durationLong } from './view.js';
 
@@ -29,6 +33,7 @@ let stopConfirmUntil = 0;
 let saveConfirmUntil = 0;
 let reloadWhenSetupCloses = false;
 let rolledDate = null; // { saved, shown } when Setup moved an ended session's date forward
+let timesShown = { start: '', end: '' }; // the Start/Stop times Setup opened with, to spot edits
 let newGigSetup = false; // Setup was opened from "New gig", so Save always starts fresh
 
 // ---------- small helpers ----------
@@ -404,6 +409,13 @@ function fillForm(config) {
   $('f-breaks-on').checked = config.schedule?.breaksOn ?? breaks.length > 0;
   $('f-pause').checked = config.manualPause === true;
   form.elements.decimals.value = String(decimalsOf(config));
+
+  const { start, end } = editableTimes(session);
+  timesShown = { start: start ? hhmm(new Date(start.t)) : '', end: end ? hhmm(new Date(end.t)) : '' };
+  $('f-begin-at').value = '';
+  $('f-start-at').value = timesShown.start;
+  $('f-end-at').value = timesShown.end;
+  setText($('end-at-label'), end?.type === 'pause' ? 'Paused at' : 'Stopped at');
   form.elements.theme.value = themeOf(config);
 }
 
@@ -463,6 +475,44 @@ function saveRestarts(config) {
   return !hasSaved || newGigSetup || rearm || payKey(asSaved(config)) !== payKey(session.config);
 }
 
+// "This gig" offers one of two things. For a gig that hasn't started (or that Save will
+// start fresh), "Already working? Started at" starts the meter from a past time. For a
+// gig under way, its Start and its Stop (or last Pause) can be corrected. It isn't shown
+// when the corrections would be thrown away, or for a schedule's own start.
+function timesMode(config) {
+  const fresh = saveRestarts(config) || !session.events.length;
+  if (fresh) return config.mode === 'manual' ? 'begin' : null;
+  const { start, end } = editableTimes(session);
+  return start || end ? 'fix' : null;
+}
+
+// The gig with the times entered in "This gig" applied (only fields that were changed).
+function applyTimes(base, mode, now) {
+  if (mode === 'begin') {
+    const value = $('f-begin-at').value;
+    return value ? startAt(base, value, now) : { session: base };
+  }
+  if (mode !== 'fix') return { session: base };
+  let fixed = base;
+  const startValue = $('f-start-at').value;
+  const endValue = $('f-end-at').value;
+  if (timesShown.start && startValue && startValue !== timesShown.start) {
+    const result = setStartTime(fixed, startValue, now);
+    if (result.error) return result;
+    fixed = result.session;
+  }
+  if (timesShown.end && endValue && endValue !== timesShown.end) {
+    const result = setEndTime(fixed, endValue, now);
+    if (result.error) return result;
+    fixed = result.session;
+  }
+  return { session: fixed };
+}
+
+const timesChanged = (mode) => (mode === 'begin'
+  ? Boolean($('f-begin-at').value)
+  : mode === 'fix' && ($('f-start-at').value !== timesShown.start || $('f-end-at').value !== timesShown.end));
+
 function formError(config, now) {
   const error = validateConfig(config);
   if (error) return error;
@@ -483,21 +533,44 @@ function updateForm(showErrors = false) {
   $('schedule-fields').hidden = config.mode !== 'scheduled';
   $('breaks-area').hidden = !config.schedule.breaksOn;
 
+  const mode = timesMode(config);
+  $('times-field').hidden = !mode;
+  $('begin-wrap').hidden = mode !== 'begin';
+  $('fix-wrap').hidden = mode !== 'fix';
+  $('start-at-wrap').hidden = !timesShown.start;
+  $('end-at-wrap').hidden = !timesShown.end;
+  setText($('times-hint'), mode === 'begin'
+    ? 'Leave blank to start with the Start button, or enter a time to start the meter from then.'
+    : 'Forgot to tap Start or Stop? Set the real time and the total updates. This doesn’t restart the meter.');
+
   const summary = $('summary');
   const error = formError(config, now);
-  summary.classList.toggle('error', Boolean(error) && (showErrors || config.amountCents > 0));
+  // Corrected times: check them, and show the total they give.
+  let timesNote = null;
+  let timesError = null;
+  if (!error && mode && timesChanged(mode)) {
+    const base = mode === 'begin' && saveRestarts(config) ? newSession(config) : { ...session, config: asSaved(config) };
+    const result = applyTimes(base, mode, now);
+    if (result.error) timesError = result.error;
+    else timesNote = `With these times: ${formatMoney(getStatus(result.session, now).cents)} earned so far`;
+  }
+
+  summary.classList.toggle('error', Boolean(error || timesError) && (showErrors || config.amountCents > 0 || Boolean(timesError)));
   if (error && !showErrors && !$('f-amount').value.trim()) {
     setText(summary, 'Enter your pay to see how fast it adds up.');
-  } else if (error) {
-    setText(summary, error);
+  } else if (error || timesError) {
+    setText(summary, error || timesError);
     summary.classList.add('error');
+  } else if (timesNote) {
+    setText(summary, timesNote);
   } else {
     const preview = getStatus(newSession(config), now);
     const rate = rateText(preview);
     setText(summary, preview.plannedMs ? `${durationLong(preview.plannedMs)} of work · ${rate}` : rate);
   }
 
-  setText($('save'), saveLabel(config, now));
+  const label = saveLabel(config, now);
+  setText($('save'), label === 'Save' && mode === 'begin' && timesChanged(mode) ? 'Save & start' : label);
 }
 
 // When saving would restart a meter with money on it, Save asks for a second tap.
@@ -564,17 +637,18 @@ $('setup').addEventListener('click', (e) => {
   if (e.target === $('setup') && hasSaved) closeSetup();
 });
 
+function refuseSave() {
+  updateForm(true);
+  const save = $('save');
+  save.classList.remove('shake');
+  void save.offsetWidth;
+  save.classList.add('shake');
+}
+
 form.addEventListener('submit', (e) => {
   e.preventDefault();
   const config = readForm();
-  if (formError(config, Date.now())) {
-    updateForm(true);
-    const save = $('save');
-    save.classList.remove('shake');
-    void save.offsetWidth;
-    save.classList.add('shake');
-    return;
-  }
+  if (formError(config, Date.now())) return refuseSave();
   const now = Date.now();
   if (moneyAtRisk(config, now) && now >= saveConfirmUntil) {
     saveConfirmUntil = now + 4000;
@@ -582,14 +656,16 @@ form.addEventListener('submit', (e) => {
     setTimeout(() => updateForm(), 4100);
     return;
   }
+  const restart = saveRestarts(config);
+  const base = restart ? newSession(config) : { ...session, config: asSaved(config) };
+  const fixed = applyTimes(base, timesMode(config), now);
+  if (fixed.error) return refuseSave();
   saveConfirmUntil = 0;
-  if (saveRestarts(config)) {
-    session = newSession(config);
+  session = fixed.session;
+  if (restart) {
     Object.assign(view, { phase: null, dollars: null });
     resetConfirmUntil = 0;
     stopConfirmUntil = 0;
-  } else {
-    session = { ...session, config: asSaved(config) };
   }
   persist();
   Object.assign(view, { cents: -1, fitKey: '', logKey: '' });
