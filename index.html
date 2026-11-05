@@ -21,7 +21,7 @@
     // Put the saved look's colors up before the app loads, so it doesn't flash Quiet first.
     try {
       const theme = JSON.parse(localStorage.getItem('gig-meter:v1'))?.config?.theme;
-      if (['quiet', 'fare', 'stub', 'poster'].includes(theme)) document.body.dataset.theme = theme;
+      if (['quiet', 'fare', 'stub', 'poster', 'stagegray', 'stagered'].includes(theme)) document.body.dataset.theme = theme;
     } catch {}
   </script>
 
@@ -242,8 +242,10 @@
           <label><input type="radio" name="theme" value="fare"><span><i class="swatch sw-fare"></i>Fare meter</span></label>
           <label><input type="radio" name="theme" value="stub"><span><i class="swatch sw-stub"></i>Pay stub</span></label>
           <label><input type="radio" name="theme" value="poster"><span><i class="swatch sw-poster"></i>Poster</span></label>
+          <label><input type="radio" name="theme" value="stagegray"><span><i class="swatch sw-stagegray"></i>Stage gray</span></label>
+          <label><input type="radio" name="theme" value="stagered"><span><i class="swatch sw-stagered"></i>Stage red</span></label>
         </div>
-        <span class="hint look-hint">Tap one to preview it. Changing the look doesn’t restart the meter.</span>
+        <span class="hint look-hint">Tap one to preview it. Quiet turns dark when your iPhone does. The Stage looks stay extra dim, for dark rooms. Changing the look doesn’t restart the meter.</span>
         <button type="button" class="link-btn peek-back" id="all-settings">Show all settings</button>
       </fieldset>
 

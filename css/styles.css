@@ -1,5 +1,6 @@
 /* Gig Meter: shared basics, then the Setup sheet (styled by each look's tokens),
-   then one section per look: Quiet, Fare meter, Pay stub, Poster. */
+   then one section per look: Quiet (also drawn dark, and as the two Stage looks),
+   Fare meter, Pay stub, Poster. */
 
 /* ---------- Look tokens (the Setup sheet and page background use these) ---------- */
 
@@ -19,6 +20,97 @@ body[data-theme="quiet"] {
   --radius: 12px;
   --font-ui: -apple-system, BlinkMacSystemFont, system-ui, "Helvetica Neue", Arial, sans-serif;
   --font-num: var(--font-ui);
+  /* Shared by every look unless it sets its own. */
+  --link: var(--accent);        /* text buttons: Cancel, Clear, Setup */
+  --select: var(--accent);      /* outline of the chosen chip, look or option */
+  --danger-ink: #FFFFFF;        /* text on a red confirm button */
+  --knob: #FFFFFF;              /* on/off switch knob */
+  /* The Quiet layout's own colors (also used by the dark and Stage versions). */
+  --q-card: #FFFFFF;
+  --q-btn: var(--accent);
+  --q-btn-ink: var(--accent-ink);
+  --q-btn-line: transparent;
+  --q-idle: #6C6C70;
+  --q-run: #1E7A34;
+  --q-break: #9A5800;
+}
+
+/* Quiet goes dark when the phone does (iPhone's own dark colors). */
+@media (prefers-color-scheme: dark) {
+  body[data-theme="quiet"] {
+    color-scheme: dark;
+    --bg: #000000;
+    --text: #F2F2F7;
+    --muted: #98989F;
+    --line: #38383A;
+    --sheet: #1C1C1E;
+    --field: #2C2C2E;
+    --field-line: #48484A;
+    --accent: #0A84FF;
+    --accent-ink: #FFFFFF;
+    --danger: #FF453A;
+    --switch-off: #39393D;
+    --q-card: #1C1C1E;
+    --q-idle: #98989F;
+    --q-run: #30D158;
+    --q-break: #FF9F0A;
+  }
+}
+
+/* Stage looks: Quiet's layout, extra dim for a dark room such as an orchestra pit.
+   No white anywhere; text is readable up close but gives off little light.
+   Contrast on black: text 5.0:1, secondary text 3.0:1 (gray); 3.8:1 and 2.6:1 (red). */
+body[data-theme="stagegray"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --text: #7C7C80;
+  --muted: #58585C;
+  --line: #1F1F21;
+  --sheet: #0A0A0B;
+  --field: #121214;
+  --field-line: #2A2A2D;
+  --accent: #333337;
+  --accent-ink: #9A9A9E;
+  --link: #5A7494;
+  --select: #7C7C80;
+  --danger: #94504A;
+  --danger-ink: #000000;
+  --switch-off: #1C1C1F;
+  --knob: #6E6E72;
+  --q-card: #0D0D0E;
+  --q-btn: #141416;
+  --q-btn-ink: #7C7C80;
+  --q-btn-line: #2A2A2D;
+  --q-idle: #58585C;
+  --q-run: #4F8159;
+  --q-break: #8E703C;
+}
+
+/* All red, like a night-vision light: state is told by the word, not the color. */
+body[data-theme="stagered"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --text: #B8402F;
+  --muted: #8A3226;
+  --line: #1E0806;
+  --sheet: #0A0302;
+  --field: #120504;
+  --field-line: #2E0E0A;
+  --accent: #3A100B;
+  --accent-ink: #C8503E;
+  --link: #A0392B;
+  --select: #B8402F;
+  --danger: #B8402F;
+  --danger-ink: #000000;
+  --switch-off: #1E0806;
+  --knob: #8A3226;
+  --q-card: #0E0403;
+  --q-btn: #1A0705;
+  --q-btn-ink: #B8402F;
+  --q-btn-line: #2E0E0A;
+  --q-idle: #8A3226;
+  --q-run: #B8402F;
+  --q-break: #B8402F;
 }
 
 body[data-theme="fare"] {
@@ -165,7 +257,7 @@ body[data-theme="poster"] .sheet, body[data-theme="stub"] .sheet { border-radius
   border-bottom: 1px solid var(--line);
 }
 .sheet-head h2 { font-size: 17px; font-weight: 600; }
-.link-btn { justify-self: start; min-height: 44px; padding: 0 4px; border: none; background: none; color: var(--accent); font-size: 17px; }
+.link-btn { justify-self: start; min-height: 44px; padding: 0 4px; border: none; background: none; color: var(--link); font-size: 17px; }
 
 .field { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 22px; padding: 0; border: none; }
 .label { padding: 0; font-size: 15px; font-weight: 600; color: var(--text); }
@@ -186,7 +278,7 @@ input[type="text"], input[type="number"], input[type="date"], input[type="time"]
   appearance: none;
 }
 input::placeholder { color: var(--muted); opacity: 0.7; }
-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:focus { outline: 2px solid var(--select); outline-offset: 1px; }
 input::-webkit-date-and-time-value { text-align: left; }
 
 .chips, .looks { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -200,8 +292,8 @@ input::-webkit-date-and-time-value { text-align: left; }
   background: var(--field);
   font-size: 15px;
 }
-.chips input:checked + span { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
-.chips input:focus-visible + span, .segmented input:focus-visible + span, .looks input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chips input:checked + span { border-color: var(--select); background: var(--accent); color: var(--accent-ink); }
+.chips input:focus-visible + span, .segmented input:focus-visible + span, .looks input:focus-visible + span { outline: 2px solid var(--select); outline-offset: 2px; }
 
 .money-input {
   display: flex;
@@ -212,7 +304,7 @@ input::-webkit-date-and-time-value { text-align: left; }
   border-radius: var(--radius);
   background: var(--field);
 }
-.money-input:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.money-input:focus-within { outline: 2px solid var(--select); outline-offset: 1px; }
 .money-input .prefix { font: 400 30px var(--font-num); color: var(--muted); }
 .money-input input {
   flex: 1;
@@ -237,7 +329,7 @@ input::-webkit-date-and-time-value { text-align: left; }
 }
 .segmented label { display: flex; }
 .segmented span { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px 8px; border-radius: calc(var(--radius) - 3px); text-align: center; font-size: 15px; color: var(--muted); }
-.segmented input:checked + span { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.segmented input:checked + span { background: var(--accent); box-shadow: inset 0 0 0 1px var(--select); color: var(--accent-ink); font-weight: 600; }
 .segmented.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .segmented.four span { padding: 10px 2px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
@@ -253,9 +345,13 @@ input::-webkit-date-and-time-value { text-align: left; }
   background: var(--field);
   font-size: 15px;
 }
-.looks input:checked + span { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.looks input:checked + span { border-color: var(--select); box-shadow: inset 0 0 0 1px var(--select); font-weight: 600; }
 .swatch { flex: none; width: 26px; height: 26px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
-.sw-quiet { background: linear-gradient(#F2F2F7 60%, #0062D1 60%); }
+.sw-quiet { background: linear-gradient(135deg, #F2F2F7 50%, #000000 50%); } /* light or dark, with the phone */
+.sw-stagegray { background: linear-gradient(#000000 60%, #7C7C80 60%); }
+.sw-stagered { background: linear-gradient(#000000 60%, #B8402F 60%); }
+/* In a Stage look, the other looks' light swatches would be the brightest thing on screen. */
+body[data-theme="stagegray"] .swatch, body[data-theme="stagered"] .swatch { filter: brightness(0.45); }
 .sw-fare { background: linear-gradient(#1B1A18 60%, #FFB21A 60%); }
 .sw-stub { background: linear-gradient(#F3EFE6 60%, #23201B 60%); }
 .sw-poster { background: linear-gradient(#FF6B1A 60%, #15120E 60%); }
@@ -307,13 +403,13 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
   width: 27px;
   height: 27px;
   border-radius: min(14px, calc(var(--radius) * 3));
-  background: #FFFFFF;
+  background: var(--knob);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   transition: transform 0.2s;
 }
-.switch:checked { background: var(--accent); }
+.switch:checked { background: var(--accent); box-shadow: inset 0 0 0 1px var(--select); }
 .switch:checked::before { transform: translateX(20px); }
-.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch:focus-visible { outline: 2px solid var(--select); outline-offset: 2px; }
 .breaks-area { display: flex; flex-direction: column; gap: 8px; }
 
 /* "This gig": correcting when it started or stopped. */
@@ -374,37 +470,39 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 
 /* ---------- Quiet: native iPhone restraint ---------- */
 
+/* Colors come from the look tokens, so the same layout also draws dark Quiet and the
+   two Stage looks. */
 .quiet { gap: 14px; padding-top: calc(env(safe-area-inset-top) + 8px); }
-body[data-theme="quiet"] { --q-state: #6C6C70; }
-body[data-theme="quiet"][data-phase="running"],
-body[data-theme="quiet"][data-phase="paid"] { --q-state: #1E7A34; }
-body[data-theme="quiet"][data-phase="break"] { --q-state: #9A5800; }
+body { --q-state: var(--q-idle); }
+body[data-phase="running"],
+body[data-phase="paid"] { --q-state: var(--q-run); }
+body[data-phase="break"] { --q-state: var(--q-break); }
 
 .q-top { display: flex; justify-content: flex-end; }
-.q-link { min-height: 44px; padding: 0 4px; border: none; background: none; color: #0062D1; font-size: 17px; }
+.q-link { min-height: 44px; padding: 0 4px; border: none; background: none; color: var(--link); font-size: 17px; }
 .q-head { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
 .q-title { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
-.q-sub { font-size: 15px; color: #6C6C70; }
+.q-sub { font-size: 15px; color: var(--muted); }
 .q-readout { display: flex; flex-direction: column; gap: 10px; padding: 18px 4px 6px; }
-.q-amount { --amount-max: 72px; font-size: 66px; font-weight: 300; letter-spacing: -0.02em; color: #1C1C1E; }
+.q-amount { --amount-max: 72px; font-size: 66px; font-weight: 300; letter-spacing: -0.02em; color: var(--text); }
 .q-status { display: flex; align-items: center; gap: 6px; font-size: 17px; }
 .q-check { display: none; color: var(--q-state); }
 body[data-phase="paid"] .q-check { display: block; }
 .q-state { font-weight: 600; color: var(--q-state); }
-.q-worked { color: #6C6C70; font-variant-numeric: tabular-nums; }
-.q-bar { height: 4px; overflow: hidden; border-radius: 2px; background: #D1D1D6; }
+.q-worked { color: var(--muted); font-variant-numeric: tabular-nums; }
+.q-bar { height: 4px; overflow: hidden; border-radius: 2px; background: var(--field-line); }
 .q-fill { width: 0; height: 100%; background: var(--q-state); transition: width 0.5s linear; }
-.q-list { display: flex; flex-direction: column; border-radius: 12px; background: #FFFFFF; }
+.q-list { display: flex; flex-direction: column; border-radius: 12px; background: var(--q-card); }
 .q-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 46px; margin-left: 16px; padding: 10px 16px 10px 0; font-size: 17px; }
-.q-row span:last-child { color: #6C6C70; text-align: right; font-variant-numeric: tabular-nums; }
-.q-row:not([hidden]) ~ .q-row:not([hidden]) { border-top: 0.5px solid #D8D8DD; }
-.q-caption { padding: 0 16px; font-size: 15px; line-height: 1.35; color: #6C6C70; }
+.q-row span:last-child { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.q-row:not([hidden]) ~ .q-row:not([hidden]) { border-top: 0.5px solid var(--line); }
+.q-caption { padding: 0 16px; font-size: 15px; line-height: 1.35; color: var(--muted); }
 .q-actions { display: flex; flex-direction: column; gap: 6px; }
-.q-primary { min-height: 52px; border: none; border-radius: 14px; background: #0062D1; color: #FFFFFF; font-size: 17px; font-weight: 600; }
+.q-primary { min-height: 52px; border: none; border-radius: 14px; background: var(--q-btn); box-shadow: inset 0 0 0 1px var(--q-btn-line); color: var(--q-btn-ink); font-size: 17px; font-weight: 600; }
 .q-primary:active { filter: brightness(0.9); }
-.q-reset { min-height: 44px; border: none; background: none; color: #C4281C; font-size: 17px; }
+.q-reset { min-height: 44px; border: none; background: none; color: var(--danger); font-size: 17px; }
 .q-reset.confirm { font-weight: 700; }
-.q-primary.confirm { background: #C4281C; }
+.q-primary.confirm { background: var(--danger); color: var(--danger-ink); }
 
 /* ---------- Fare meter: a taxi meter ---------- */
 

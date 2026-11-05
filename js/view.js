@@ -10,9 +10,14 @@ export const THEMES = {
   fare: { label: 'Fare meter', fonts: 'family=Barlow+Condensed:wght@500;600;700&family=Share+Tech+Mono', color: '#1B1A18' },
   stub: { label: 'Pay stub', fonts: 'family=IBM+Plex+Mono:wght@400;500;600;700', color: '#2B2A27' },
   poster: { label: 'Poster', fonts: 'family=Archivo:wdth,wght@62..125,400..900', color: '#FF6B1A' },
+  // Extra-dim versions of Quiet for dark rooms (an orchestra pit): same layout, own colors.
+  stagegray: { label: 'Stage gray', fonts: null, color: '#000000', face: 'quiet' },
+  stagered: { label: 'Stage red', fonts: null, color: '#000000', face: 'quiet' },
 };
 export const DEFAULT_THEME = 'quiet';
 export const themeOf = (config) => (Object.hasOwn(THEMES, config?.theme ?? '') ? config.theme : DEFAULT_THEME);
+// Which layout on the page draws a look.
+export const faceOf = (theme) => THEMES[theme]?.face ?? theme;
 
 export const UNITS = {
   hourly: 'per hour', service: 'per service', day: 'per day', flat: 'for the job',

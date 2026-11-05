@@ -17,7 +17,7 @@ import {
   setStartTime,
   setEndTime,
 } from './meter.js';
-import { THEMES, DEFAULT_THEME, themeOf, viewModel, UNITS, durationLong } from './view.js';
+import { THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
 const $ = (id) => document.getElementById(id);
@@ -127,10 +127,13 @@ function syncTopBar() {
   document.querySelector('meta[name="theme-color"]').content = bg || THEMES[view.theme].color;
 }
 
+// Quiet turns dark with the phone, so its top-bar color follows the switch too.
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => syncTopBar());
+
 function applyTheme(theme) {
   if (theme === view.theme) return;
-  const face = faces[theme];
-  for (const [name, el] of Object.entries(faces)) el.hidden = name !== theme;
+  const face = faces[faceOf(theme)];
+  for (const el of Object.values(faces)) el.hidden = el !== face;
   document.body.dataset.theme = theme;
   loadFonts(theme);
   view.theme = theme;
