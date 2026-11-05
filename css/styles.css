@@ -469,7 +469,24 @@ body[data-theme="poster"] { --switch-off: #C8BFB2; }
 .saved-title, .saved-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved-title { font-size: 16px; font-weight: 600; }
 .saved-sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.saved-row .remove.confirm { width: auto; padding: 0 12px; color: var(--danger); font-size: 15px; font-weight: 600; }
+.remove.confirm { width: auto; padding: 0 12px; color: var(--danger); font-size: 15px; font-weight: 600; }
+
+/* History: opened from the right of Setup's header; three totals, then past gigs. */
+.head-right { justify-self: end; }
+.peek #open-history { visibility: hidden; }
+.history-sheet { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+.history-sheet .hint { display: block; margin: 0 0 8px; }
+.totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.total { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid var(--field-line); border-radius: var(--radius); background: var(--field); }
+.total span { font-size: 13px; color: var(--muted); }
+.total b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 17px var(--font-num); font-variant-numeric: tabular-nums; color: var(--text); }
+.history-list { display: flex; flex-direction: column; margin: 0 0 16px; padding: 0; list-style: none; }
+.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; min-height: 60px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.h-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.h-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
+.h-sub { font-size: 13px; color: var(--muted); }
+.h-amount { font: 600 16px var(--font-num); font-variant-numeric: tabular-nums; }
+.history-row.now .h-sub { color: var(--q-run); }
 
 .sheet-foot {
   position: sticky;

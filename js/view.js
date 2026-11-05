@@ -1,7 +1,7 @@
 // Screen text for every look. Pure: given a session, its status and the time, it
 // returns the strings and numbers the four looks show, so they all agree.
 
-import { FORMATS, formatAmount, formatMoney, formatClock, unitsEarned, history, validateConfig } from './meter.js';
+import { FORMATS, formatAmount, formatMoney, formatClock, unitsEarned, history, getStatus, validateConfig } from './meter.js';
 
 // The looks the app can wear. `fonts` is the Google Fonts family list each needs
 // (loaded only when that look is on); `color` is its top-of-screen color.
@@ -234,4 +234,84 @@ export function readSaved(raw) {
     if (list.length === SAVED_MAX) break;
   }
   return list;
+}
+
+// ---------- earnings history ----------
+// Past gigs, newest first, each a frozen record of what it earned:
+// { id, title, pay, cents, workedMs, startedAt, endedAt }. Pure: the app stores it.
+
+export const HISTORY_MAX = 500;
+
+const time12At = (ms) => { const d = new Date(ms); return time12(`${d.getHours()}:${d.getMinutes()}`); };
+
+// The record for a gig as of `now`, or null when it earned nothing.
+export function historyEntry(session, now, id) {
+  const status = getStatus(session, now);
+  if (!(status.cents > 0)) return null;
+  const moments = history(session, now);
+  const last = moments.at(-1);
+  return {
+    id,
+    title: savedTitle(session.config),
+    pay: savedPay(session.config),
+    cents: status.cents,
+    workedMs: status.workedMs,
+    startedAt: moments[0]?.t ?? Math.floor(now),
+    endedAt: status.running || !last ? Math.floor(now) : last.t,
+  };
+}
+
+export const addHistory = (list, entry) => [entry, ...list].slice(0, HISTORY_MAX);
+export const removeHistory = (list, id) => list.filter((e) => e.id !== id);
+
+export function readHistory(raw) {
+  let data;
+  try { data = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(data)) return [];
+  const seen = new Set();
+  const list = [];
+  for (const e of data) {
+    const ok = e && typeof e.id === 'string' && e.id && !seen.has(e.id)
+      && typeof e.title === 'string' && typeof e.pay === 'string'
+      && Number.isSafeInteger(e.cents) && e.cents > 0
+      && [e.workedMs, e.startedAt, e.endedAt].every(Number.isFinite) && e.workedMs >= 0;
+    if (!ok) continue;
+    seen.add(e.id);
+    const { id, title, pay, cents, workedMs, startedAt, endedAt } = e;
+    list.push({ id, title, pay, cents, workedMs, startedAt, endedAt });
+    if (list.length === HISTORY_MAX) break;
+  }
+  return list;
+}
+
+// Earned this week (from Monday 00:00), this month and this year. A gig counts on
+// the day it started.
+export function historyTotals(list, now) {
+  const d = new Date(now);
+  const from = {
+    week: new Date(d.getFullYear(), d.getMonth(), d.getDate() - ((d.getDay() + 6) % 7)).getTime(),
+    month: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
+    year: new Date(d.getFullYear(), 0, 1).getTime(),
+  };
+  const total = (start) => list.reduce((sum, e) => sum + (e.startedAt >= start ? e.cents : 0), 0);
+  return { week: total(from.week), month: total(from.month), year: total(from.year) };
+}
+
+const dayLabel = (ms, now) => {
+  const d = new Date(ms);
+  const today = new Date(now);
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  const year = d.getFullYear() === today.getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
+};
+
+// "Today, 9:00 AM · 1 hr 30 min" and "$90.00".
+export function historyRow(entry, now) {
+  return {
+    title: entry.title,
+    sub: `${dayLabel(entry.startedAt, now)}, ${time12At(entry.startedAt)} · ${durationLong(entry.workedMs)}`,
+    amount: formatMoney(entry.cents),
+  };
 }

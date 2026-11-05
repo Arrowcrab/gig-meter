@@ -156,7 +156,7 @@
       <header class="sheet-head">
         <button type="button" class="link-btn" id="cancel-setup">Cancel</button>
         <h2>Gig setup</h2>
-        <span class="sheet-spacer"></span>
+        <button type="button" class="link-btn head-right" id="open-history">History</button>
       </header>
 
       <fieldset class="field times" id="times-field" hidden>
@@ -278,6 +278,25 @@
     </form>
   </div>
 
+  <!-- History: what past gigs earned, opened from Setup's header. -->
+  <div class="sheet-backdrop" id="history" hidden>
+    <section class="sheet history-sheet" aria-labelledby="history-title">
+      <header class="sheet-head">
+        <button type="button" class="link-btn" id="close-history">Done</button>
+        <h2 id="history-title">History</h2>
+        <span></span>
+      </header>
+      <div class="totals">
+        <div class="total"><span>This week</span><b id="t-week"></b></div>
+        <div class="total"><span>This month</span><b id="t-month"></b></div>
+        <div class="total"><span>This year</span><b id="t-year"></b></div>
+      </div>
+      <ul class="history-list" id="history-list"></ul>
+      <p class="hint" id="history-empty">No gigs yet. A gig lands here, with what it earned, when you start a new one or reset the meter.</p>
+      <p class="hint">Weeks run Monday to Sunday. Each gig counts on the day it started.</p>
+    </section>
+  </div>
+
   <template id="break-row">
     <li class="break-row">
       <input type="time" class="b-start" aria-label="Break start">
@@ -291,6 +310,14 @@
     <li class="saved-row">
       <button type="button" class="saved-load"><span class="saved-title"></span><span class="saved-sub"></span></button>
       <button type="button" class="remove" aria-label="Remove saved gig">&times;</button>
+    </li>
+  </template>
+
+  <template id="history-row">
+    <li class="history-row">
+      <span class="h-text"><span class="h-title"></span><span class="h-sub"></span></span>
+      <b class="h-amount"></b>
+      <button type="button" class="remove" aria-label="Remove from history">&times;</button>
     </li>
   </template>
 </body>

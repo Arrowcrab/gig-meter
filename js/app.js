@@ -20,6 +20,7 @@ import {
 import {
   THEMES, DEFAULT_THEME, themeOf, faceOf, viewModel, UNITS, durationLong,
   savedTitle, savedSummary, upsertSaved, removeSaved, matchSaved, readSaved,
+  historyEntry, addHistory, removeHistory, readHistory, historyTotals, historyRow,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -120,6 +121,29 @@ function persistSaved() {
   } catch {
     // Storage unavailable: the list still works until the app is closed.
   }
+}
+
+// History: what past gigs earned. A gig with money on it is filed here when it's
+// replaced by a new one or Reset (with the Pause button on, that's how a gig ends).
+const HISTORY_KEY = 'gig-meter:history:v1';
+let pastGigs = [];
+try { pastGigs = readHistory(localStorage.getItem(HISTORY_KEY)); } catch { pastGigs = []; }
+
+const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+function persistHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(pastGigs));
+  } catch {
+    // Storage unavailable: kept until the app is closed.
+  }
+}
+
+function fileInHistory(old, now) {
+  const entry = historyEntry(old, now, newId());
+  if (!entry) return;
+  pastGigs = addHistory(pastGigs, entry);
+  persistHistory();
 }
 
 // ---------- looks ----------
@@ -357,6 +381,7 @@ function pressReset() {
   }
   resetConfirmUntil = 0;
   stopConfirmUntil = 0;
+  if (hasSaved) fileInHistory(session, now);
   session = reset(session);
   persist();
   kick();
@@ -625,23 +650,7 @@ function savedRow(entry) {
   setText(li.querySelector('.saved-sub'), summary);
   li.querySelector('.saved-sub').hidden = summary === title; // an unnamed gig's title already says it
   li.querySelector('.saved-load').addEventListener('click', () => loadSaved(entry));
-  // Removing takes two taps: × turns into "Remove" for a few seconds.
-  const remove = li.querySelector('.remove');
-  let undoTimer = 0;
-  const unarm = () => {
-    remove.classList.remove('confirm');
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', 'Remove saved gig');
-  };
-  remove.addEventListener('click', () => {
-    if (!remove.classList.contains('confirm')) {
-      remove.classList.add('confirm');
-      remove.textContent = 'Remove';
-      remove.setAttribute('aria-label', `Tap again to remove ${savedTitle(entry.config)}`);
-      undoTimer = setTimeout(unarm, 3000);
-      return;
-    }
-    clearTimeout(undoTimer);
+  twoTapRemove(li.querySelector('.remove'), title, () => {
     savedGigs = removeSaved(savedGigs, entry.id);
     persistSaved();
     renderSaved();
@@ -649,6 +658,77 @@ function savedRow(entry) {
   });
   return li;
 }
+
+// Removing takes two taps: × turns into "Remove" for a few seconds.
+function twoTapRemove(button, what, onRemove) {
+  let timer = 0;
+  const unarm = () => {
+    button.classList.remove('confirm');
+    button.textContent = '×';
+    button.setAttribute('aria-label', `Remove ${what}`);
+  };
+  unarm();
+  button.addEventListener('click', () => {
+    if (!button.classList.contains('confirm')) {
+      button.classList.add('confirm');
+      button.textContent = 'Remove';
+      button.setAttribute('aria-label', `Tap again to remove ${what}`);
+      timer = setTimeout(unarm, 3000);
+      return;
+    }
+    clearTimeout(timer);
+    onRemove();
+  });
+}
+
+// ---------- history sheet ----------
+
+// The current gig shows on top and counts in the totals, but stays out of the stored
+// list until it's replaced or Reset.
+function renderHistory() {
+  const now = Date.now();
+  const current = hasSaved ? historyEntry(session, now, 'current') : null;
+  const newestFirst = [...pastGigs].sort((a, b) => b.startedAt - a.startedAt); // a corrected time can reorder them
+  const all = current ? [current, ...newestFirst] : newestFirst;
+  const totals = historyTotals(all, now);
+  setText($('t-week'), formatMoney(totals.week));
+  setText($('t-month'), formatMoney(totals.month));
+  setText($('t-year'), formatMoney(totals.year));
+  $('history-empty').hidden = all.length > 0;
+  $('history-list').replaceChildren(...all.map((entry) => historyItem(entry, now, entry === current)));
+}
+
+function historyItem(entry, now, isCurrent) {
+  const li = $('history-row').content.firstElementChild.cloneNode(true);
+  const row = historyRow(entry, now);
+  setText(li.querySelector('.h-title'), row.title);
+  setText(li.querySelector('.h-sub'), isCurrent ? `Current gig · ${row.sub}` : row.sub);
+  setText(li.querySelector('.h-amount'), row.amount);
+  const remove = li.querySelector('.remove');
+  if (isCurrent) {
+    li.classList.add('now');
+    remove.style.visibility = 'hidden'; // keeps the amounts lined up
+    remove.disabled = true;
+  } else {
+    twoTapRemove(remove, `${row.title} from history`, () => {
+      pastGigs = removeHistory(pastGigs, entry.id);
+      persistHistory();
+      renderHistory();
+    });
+  }
+  return li;
+}
+
+const closeHistory = () => { $('history').hidden = true; };
+$('open-history').addEventListener('click', () => {
+  renderHistory();
+  $('history').hidden = false;
+  $('history').querySelector('.sheet').scrollTop = 0;
+});
+$('close-history').addEventListener('click', closeHistory);
+$('history').addEventListener('click', (e) => {
+  if (e.target === $('history')) closeHistory();
+});
 
 function renderSaved() {
   $('saved-field').hidden = !savedGigs.length;
@@ -674,8 +754,7 @@ $('save-gig').addEventListener('click', () => {
     savedHint(error, true);
     return;
   }
-  const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const result = upsertSaved(savedGigs, config, { id, now: Date.now() });
+  const result = upsertSaved(savedGigs, config, { id: newId(), now: Date.now() });
   if (result.error) {
     savedHint(result.error, true);
     return;
@@ -696,17 +775,18 @@ $('save-gig').addEventListener('click', () => {
   updateForm();
 });
 
-// When saving would restart a meter with money on it, Save asks for a second tap.
+// When saving would restart a meter that's still going with money on it, Save asks
+// for a second tap. A finished gig (stopped, schedule over, paid) just goes to History.
 function moneyAtRisk(config, now) {
   if (!saveRestarts(config)) return 0;
   const live = getStatus(session, now);
-  return hasSaved && live.cents > 0 && live.phase !== 'paid' ? live.cents : 0;
+  return hasSaved && live.cents > 0 && live.phase !== 'paid' && live.phase !== 'over' ? live.cents : 0;
 }
 
 function saveLabel(config, now) {
   const cents = moneyAtRisk(config, now);
   if (!cents) return 'Save';
-  return now < saveConfirmUntil ? `Tap again to clear ${formatMoney(cents)}` : 'Save & restart meter';
+  return now < saveConfirmUntil ? `Tap again · ${formatMoney(cents)} goes to History` : 'Save & restart meter';
 }
 
 function openSetup({ newGig = false } = {}) {
@@ -792,6 +872,7 @@ form.addEventListener('submit', (e) => {
   const fixed = applyTimes(base, timesMode(config), now);
   if (fixed.error) return refuseSave();
   saveConfirmUntil = 0;
+  if (restart && hasSaved) fileInHistory(session, now);
   session = fixed.session;
   if (restart) {
     Object.assign(view, { phase: null, dollars: null });
