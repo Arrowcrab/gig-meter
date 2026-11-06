@@ -30,6 +30,8 @@ import {
   wantsInstallHint, receipt, receiptText, receiptFileName, gigFinished,
   undoState, resetLabel, resetTap, primaryBlocked,
   saveRestarts as restartsOnSave, repriceNote, saveEndsGig,
+  readSession, backupData, readBackup, mergeBackup, restoreText, restoreChanges, historyCsv,
+  backupFileName, historyCsvFileName,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -110,10 +112,7 @@ function defaultConfig() {
 
 function load() {
   try {
-    const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (!data || !Array.isArray(data.events) || validateConfig(data.config)) return null;
-    const events = data.events.filter((e) => Number.isFinite(e?.t) && ['resume', 'pause', 'stop'].includes(e.type));
-    return { config: data.config, events, scheduleArmed: Boolean(data.scheduleArmed) };
+    return readSession(JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'));
   } catch {
     return null;
   }
@@ -859,8 +858,12 @@ function historyItem(entry, now, isCurrent) {
   return li;
 }
 
-const closeHistory = () => { $('history').hidden = true; };
+const closeHistory = () => {
+  $('history').hidden = true;
+  resetDataView();
+};
 $('open-history').addEventListener('click', () => {
+  resetDataView();
   renderHistory();
   $('history').hidden = false;
   fitTotals();
@@ -869,6 +872,130 @@ $('open-history').addEventListener('click', () => {
 $('close-history').addEventListener('click', closeHistory);
 $('history').addEventListener('click', (e) => {
   if (e.target === $('history')) closeHistory();
+});
+
+// ---------- your data: backup, restore, spreadsheet ----------
+
+const dataView = { backup: null }; // a backup read and waiting for Restore
+const BAD_FILE = 'That file isn’t a Gig Meter backup.';
+
+function dataNote(text, isError = false) {
+  setText($('data-note'), text);
+  $('data-note').classList.toggle('error', isError);
+}
+
+function resetDataView() {
+  dataView.backup = null;
+  $('restore-box').hidden = true;
+  dataNote('');
+}
+
+const dataHere = () => ({ session: hasSaved ? session : null, saved: savedGigs, history: pastGigs });
+
+// Hands a file to the phone's share menu (Save to Files, AirDrop, Mail…), or downloads
+// it where a browser can't share files. Must be called straight from a tap.
+async function shareFile(file) {
+  if (!canShareFile(file)) {
+    const url = URL.createObjectURL(file);
+    const a = Object.assign(document.createElement('a'), { href: url, download: file.name });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return 'downloaded';
+  }
+  try {
+    await navigator.share({ files: [file] });
+    return 'shared';
+  } catch (err) {
+    return err?.name === 'AbortError' ? 'cancelled' : 'failed';
+  }
+}
+
+$('save-backup').addEventListener('click', async () => {
+  resetDataView();
+  const now = Date.now();
+  const file = new File([JSON.stringify(backupData(dataHere(), now))], backupFileName(now), { type: 'application/json' });
+  const how = await shareFile(file);
+  if (how === 'failed') dataNote('The share menu didn’t open. Try again.', true);
+  else if (how !== 'cancelled') dataNote(`Backup file: ${file.name}. Keep it somewhere safe, like iCloud Drive.`);
+});
+
+$('export-csv').addEventListener('click', async () => {
+  resetDataView();
+  const now = Date.now();
+  const current = hasSaved ? historyEntry(session, now, 'current') : null;
+  const list = current ? [current, ...pastGigs] : pastGigs;
+  if (!list.length) return dataNote('No gigs in History yet.');
+  const file = new File([historyCsv(list)], historyCsvFileName(now), { type: 'text/csv' });
+  if (await shareFile(file) === 'failed') dataNote('The share menu didn’t open. Try again.', true);
+});
+
+$('restore-backup').addEventListener('click', () => {
+  resetDataView();
+  $('backup-file').value = ''; // picking the same file again still counts as a change
+  $('backup-file').click();
+});
+
+// Reads the picked file and says what restoring it would do before anything changes.
+$('backup-file').addEventListener('change', async () => {
+  const file = $('backup-file').files?.[0];
+  if (!file) return;
+  let text = '';
+  try {
+    if (file.size <= 5_000_000) text = await file.text();
+  } catch {
+    return dataNote('Couldn’t read that file.', true);
+  }
+  const backup = readBackup(text);
+  if (backup.error) return dataNote(backup.error, true);
+  let report;
+  try {
+    ({ report } = mergeBackup(dataHere(), backup, Date.now()));
+  } catch {
+    return dataNote(BAD_FILE, true);
+  }
+  if (!restoreChanges(report)) return dataNote(restoreText(report, backup));
+  dataView.backup = backup;
+  setText($('restore-text'), restoreText(report, backup));
+  $('restore-box').hidden = false;
+  $('restore-box').scrollIntoView({ block: 'nearest' });
+});
+
+$('restore-cancel').addEventListener('click', resetDataView);
+
+// Worked out again from what's on the phone now, in case anything changed meanwhile.
+$('restore-go').addEventListener('click', () => {
+  const { backup } = dataView;
+  if (!backup) return;
+  const before = dataHere();
+  let r;
+  try {
+    r = mergeBackup(before, backup, Date.now());
+  } catch {
+    resetDataView();
+    return dataNote(BAD_FILE, true);
+  }
+  resetDataView();
+  savedGigs = r.saved;
+  persistSaved();
+  pastGigs = r.history;
+  persistHistory();
+  if (r.session && r.session !== before.session) {
+    // The backup's gig came onto the meter, or the gig there was finished in the backup.
+    session = r.session;
+    undo = null;
+    persist();
+    Object.assign(view, { phase: null, dollars: null, cents: -1, fitKey: '', logKey: '' });
+    applyTheme(themeOf(session.config));
+    openSetup(); // Setup, under History, now shows the gig on the meter
+  } else {
+    renderSaved();
+  }
+  renderHistory();
+  fitTotals();
+  dataNote(restoreText(r.report, backup, { done: true }));
+  kick();
 });
 
 // ---------- receipt ----------
@@ -1119,20 +1246,9 @@ async function openReceipt(entry, live) {
 }
 
 $('share-receipt').addEventListener('click', async () => {
-  const { file, url } = receiptView;
+  const { file } = receiptView;
   if (!file) return;
-  if (!canShareFile(file)) {
-    const a = Object.assign(document.createElement('a'), { href: url, download: file.name });
-    document.body.append(a);
-    a.click();
-    a.remove();
-    return;
-  }
-  try {
-    await navigator.share({ files: [file] });
-  } catch (err) {
-    if (err?.name !== 'AbortError') setText($('receipt-hint'), 'The share menu didn’t open. Press and hold the picture to save or share it.');
-  }
+  if (await shareFile(file) === 'failed') setText($('receipt-hint'), 'The share menu didn’t open. Press and hold the picture to save or share it.');
 });
 $('close-receipt').addEventListener('click', closeReceipt);
 $('receipt').addEventListener('click', (e) => {

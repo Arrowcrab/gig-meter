@@ -344,6 +344,22 @@
       <ul class="history-list" id="history-list"></ul>
       <p class="hint" id="history-empty">No gigs yet. A gig lands here, with what it earned, when you start a new one or reset the meter.</p>
       <p class="hint">Tap a gig for its receipt. Weeks run Monday to Sunday. Each gig counts on the day it started.</p>
+      <section class="data-field" aria-labelledby="data-title">
+        <h3 class="label" id="data-title">Your data</h3>
+        <p class="hint">Everything is kept only on this phone. Save a backup now and then (to Files or iCloud Drive), and restore it on a new phone.</p>
+        <button type="button" class="data-btn" id="save-backup">Save a backup…</button>
+        <button type="button" class="data-btn" id="restore-backup">Restore a backup…</button>
+        <input type="file" class="file-pick" id="backup-file" accept=".json,application/json" tabindex="-1" aria-hidden="true">
+        <div class="restore-box" id="restore-box" hidden>
+          <p id="restore-text"></p>
+          <div class="restore-actions">
+            <button type="button" class="link-btn" id="restore-cancel">Cancel</button>
+            <button type="button" class="data-btn go" id="restore-go">Restore</button>
+          </div>
+        </div>
+        <button type="button" class="data-btn" id="export-csv">Export for a spreadsheet…</button>
+        <p class="hint data-note" id="data-note" role="status"></p>
+      </section>
     </section>
   </div>
 
