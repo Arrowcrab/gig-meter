@@ -23,7 +23,6 @@ body[data-theme="quiet"] {
   /* Shared by every look unless it sets its own. */
   --link: var(--accent);        /* text buttons: Cancel, Clear, Setup */
   --select: var(--accent);      /* outline of the chosen chip, look or option */
-  --danger-ink: #FFFFFF;        /* text on a red confirm button */
   --knob: #FFFFFF;              /* on/off switch knob */
   /* The Quiet layout's own colors (also used by the dark and Stage versions). */
   --q-card: #FFFFFF;
@@ -74,7 +73,6 @@ body[data-theme="stagegray"] {
   --link: #5A7494;
   --select: #7C7C80;
   --danger: #94504A;
-  --danger-ink: #000000;
   --switch-off: #1C1C1F;
   --knob: #6E6E72;
   --q-card: #0D0D0E;
@@ -101,7 +99,6 @@ body[data-theme="stagered"] {
   --link: #A0392B;
   --select: #B8402F;
   --danger: #B8402F;
-  --danger-ink: #000000;
   --switch-off: #1E0806;
   --knob: #8A3226;
   --q-card: #0E0403;
@@ -576,8 +573,7 @@ body[data-phase="paid"] .q-check { display: block; }
 .q-primary { min-height: 52px; border: none; border-radius: 14px; background: var(--q-btn); box-shadow: inset 0 0 0 1px var(--q-btn-line); color: var(--q-btn-ink); font-size: 17px; font-weight: 600; }
 .q-primary:active { filter: brightness(0.9); }
 .q-reset { min-height: 44px; border: none; background: none; color: var(--danger); font-size: 17px; }
-.q-reset.confirm { font-weight: 700; }
-.q-primary.confirm { background: var(--danger); color: var(--danger-ink); }
+.q-reset.undo { color: var(--link); font-weight: 600; }
 
 /* ---------- Fare meter: a taxi meter ---------- */
 
@@ -643,11 +639,10 @@ body[data-phase="running"] .f-lamp, body[data-phase="overtime"] .f-lamp, body[da
   transition: transform 0.08s, box-shadow 0.08s;
 }
 .f-key:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 2px 0 #0D0C0B; }
-.f-key.confirm { color: #FF8A6B; }
+.f-key.undo { color: #FFB21A; }
 .f-key-small { flex: none; min-width: 78px; min-height: 44px; font-size: 18px; font-weight: 600; box-shadow: 0 3px 0 #0D0C0B; }
 .f-key-primary { flex: 2; background: #FFB21A; color: #1E1405; font-size: 26px; box-shadow: 0 5px 0 #8A5E00; }
 .f-key-primary:active { box-shadow: 0 2px 0 #8A5E00; }
-.f-key-primary.confirm { background: #FF8A6B; color: #1E1405; box-shadow: 0 5px 0 #A3482F; }
 
 /* ---------- Pay stub: a printed receipt ---------- */
 
@@ -709,9 +704,8 @@ body[data-phase="paid"] .s-stamp { display: block; animation: stamp 0.35s cubic-
   font: 500 15px "IBM Plex Mono", "Courier New", monospace;
 }
 .s-btn-reset { flex: 1; }
-.s-btn-reset.confirm { border-color: #FFB4A3; color: #FFB4A3; }
+.s-btn-reset.undo { border-color: #F3EFE6; color: #F3EFE6; }
 .s-btn-primary { flex: 1.6; border: none; background: #F3EFE6; color: #23201B; font-size: 17px; font-weight: 700; }
-.s-btn-primary.confirm { background: #FFB4A3; }
 .s-btn:active:not(:disabled) { filter: brightness(0.9); }
 
 /* ---------- Poster: hi-vis big type ---------- */
@@ -736,7 +730,7 @@ body[data-phase="paid"] .poster { --ink: #FF6B1A; }
 .p-caption { margin-top: 6px; font-size: 34px; font-weight: 800; font-stretch: 88%; line-height: 1.02; letter-spacing: -0.01em; text-wrap: balance; }
 .p-actions { display: flex; gap: 10px; }
 .p-btn { width: 118px; min-height: 64px; border: 2px solid var(--ink); border-radius: 0; background: transparent; color: var(--ink); font: 800 22px "Archivo", "Helvetica Neue", Arial, sans-serif; font-stretch: 88%; }
-.p-btn.confirm { text-decoration: underline; text-underline-offset: 4px; }
+.p-btn.undo { text-decoration: underline; text-underline-offset: 4px; }
 .p-btn-primary { flex: 1; width: auto; background: var(--ink); color: var(--bg); font-size: 24px; }
 .p-btn:active:not(:disabled) { transform: translateY(1px); }
 

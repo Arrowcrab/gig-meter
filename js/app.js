@@ -22,6 +22,7 @@ import {
   savedTitle, savedSummary, upsertSaved, removeSaved, matchSaved, readSaved,
   historyEntry, addHistory, removeHistory, readHistory, historyTotals, historyRow,
   wantsInstallHint, receipt, receiptText, receiptFileName, gigFinished,
+  undoState, resetLabel, resetTap, primaryBlocked,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -33,8 +34,9 @@ const faces = Object.fromEntries([...document.querySelectorAll('[data-face]')].m
 
 const view = { theme: null, parts: null, phase: null, cents: -1, dollars: null, fitKey: '', logKey: '', led: -1 };
 const loop = { raf: 0, timer: 0 };
-let resetConfirmUntil = 0;
-let stopConfirmUntil = 0;
+// The last Stop or Reset, while it can be undone: { at, kind, before, after, historyId,
+// historyBefore, historyAfter } (the gig and the History list before and after).
+let undo = null;
 let saveConfirmUntil = 0;
 let reloadWhenSetupCloses = false;
 let rolledDate = null; // { saved, shown } when Setup moved an ended session's date forward
@@ -140,11 +142,13 @@ function persistHistory() {
   }
 }
 
+// Returns the new record's id (null when the gig earned nothing), so it can be undone.
 function fileInHistory(old, now) {
   const entry = historyEntry(old, now, newId());
-  if (!entry) return;
+  if (!entry) return null;
   pastGigs = addHistory(pastGigs, entry);
   persistHistory();
+  return entry.id;
 }
 
 // ---------- looks ----------
@@ -191,7 +195,6 @@ function applyTheme(theme) {
     log: face.querySelector('[data-log]'),
     leds: [...face.querySelectorAll('.f-led')],
     resets: [...face.querySelectorAll('[data-action="reset"]')],
-    primaries: [...face.querySelectorAll('[data-action="primary"]')],
   };
   Object.assign(view, { cents: -1, fitKey: '', logKey: '', logClock: null, led: -1 });
   syncTopBar();
@@ -288,16 +291,13 @@ function render(now) {
 
   const decimals = decimalsOf(session.config);
   const vm = viewModel(session, status, now, decimals);
-  const confirming = now < resetConfirmUntil;
-  vm.resetLabel = confirming ? 'Sure?' : status.phase === 'waiting' ? 'Cancel' : 'Reset';
-  const confirmingStop = vm.primaryAction === 'stop' && now < stopConfirmUntil;
-  if (confirmingStop) vm.primary = 'Sure?';
+  const undoing = undoState(undo, session, now) !== 'none';
+  vm.resetLabel = resetLabel(status.phase, undoing);
   applyView(vm);
   for (const button of view.parts.resets) {
-    button.disabled = status.phase === 'idle';
-    button.classList.toggle('confirm', confirming);
+    button.disabled = status.phase === 'idle' && !undoing;
+    button.classList.toggle('undo', undoing);
   }
-  for (const button of view.parts.primaries) button.classList.toggle('confirm', confirmingStop);
   fitAmount(status, decimals);
   renderCents(status);
   renderLog(vm.log, status.running);
@@ -354,19 +354,18 @@ async function syncWakeLock() {
 // ---------- meter controls (every look's buttons) ----------
 
 // The big button does whatever this look and setting show on it: start or resume,
-// pause, stop (after a "Sure?", since it can't be undone), or set up a new gig.
+// pause, stop, or set up a new gig. Stop happens on the first tap; the Reset button
+// then offers Undo for a few seconds.
 function pressPrimary() {
   const now = Date.now();
+  if (primaryBlocked(undo, session, now)) return; // the second tap of the old "tap, Sure?, tap" habit
   const status = getStatus(session, now);
   const { primaryAction } = viewModel(session, status, now, decimalsOf(session.config));
   if (primaryAction === 'newGig') return openSetup({ newGig: true });
   if (primaryAction === 'stop') {
-    if (now >= stopConfirmUntil) {
-      stopConfirmUntil = now + 3000;
-      return kick();
-    }
-    stopConfirmUntil = 0;
+    const before = session;
     session = stop(session, now);
+    undo = { at: now, kind: 'stop', before, after: session, historyId: null };
   } else if (primaryAction === 'toggle') {
     session = toggle(session, now);
   } else {
@@ -376,17 +375,34 @@ function pressPrimary() {
   kick();
 }
 
-// Reset asks "Sure?" first whenever there's money on the meter.
-function pressReset() {
+// Reset (Cancel, while a schedule waits) happens on the first tap, filing the gig in
+// History; the same button then reads Undo for a few seconds.
+function pressReset(button) {
   const now = Date.now();
-  if (getStatus(session, now).cents > 0 && now >= resetConfirmUntil) {
-    resetConfirmUntil = now + 3000;
-    return kick();
-  }
-  resetConfirmUntil = 0;
-  stopConfirmUntil = 0;
-  if (hasSaved) fileInHistory(session, now);
+  const tap = resetTap(undo, session, now, button?.classList.contains('undo'));
+  if (tap === 'ignore') return;
+  if (tap === 'undo') return undoLast();
+  const before = session;
+  const historyBefore = pastGigs;
+  const historyId = hasSaved ? fileInHistory(session, now) : null;
   session = reset(session);
+  undo = { at: now, kind: 'reset', before, after: session, historyId, historyBefore, historyAfter: pastGigs };
+  persist();
+  kick();
+}
+
+// Puts the gig back exactly as it was before the Stop or Reset. An undone Stop counts
+// the seconds in between, as if it had never stopped; an undone Reset takes the gig
+// back out of History (restoring the whole list when nothing else changed it, so a
+// full History gets back the oldest record it dropped to make room).
+function undoLast() {
+  if (undo.historyId) {
+    pastGigs = pastGigs === undo.historyAfter ? undo.historyBefore : removeHistory(pastGigs, undo.historyId);
+    persistHistory();
+  }
+  session = undo.before;
+  undo = null;
+  Object.assign(view, { cents: -1, dollars: null, fitKey: '', logKey: '' });
   persist();
   kick();
 }
@@ -397,7 +413,7 @@ document.addEventListener('click', (e) => {
   const { action } = button.dataset;
   if (action === 'setup') openSetup();
   else if (action === 'primary') pressPrimary();
-  else if (action === 'reset') pressReset();
+  else if (action === 'reset') pressReset(button);
   else if (action === 'receipt') {
     const now = Date.now();
     openReceipt(historyEntry(session, now, 'current'), !gigFinished(getStatus(session, now)));
@@ -1237,11 +1253,7 @@ form.addEventListener('submit', (e) => {
   saveConfirmUntil = 0;
   if (restart && hasSaved) fileInHistory(session, now);
   session = fixed.session;
-  if (restart) {
-    Object.assign(view, { phase: null, dollars: null });
-    resetConfirmUntil = 0;
-    stopConfirmUntil = 0;
-  }
+  if (restart) Object.assign(view, { phase: null, dollars: null });
   persist();
   Object.assign(view, { cents: -1, fitKey: '', logKey: '' });
   closeSetup();

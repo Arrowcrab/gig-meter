@@ -422,6 +422,40 @@ export function receiptFileName(entry) {
   return `${name || 'Gig'} receipt ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.png`;
 }
 
+// ---------- undo for Stop and Reset ----------
+// Stop and Reset act on the first tap; for a while afterwards the Reset button reads
+// "Undo". `undo` is { at, after, kind }: when it happened, the gig it left behind and
+// 'stop' or 'reset'. If the gig has changed since (anything else was done), there's
+// nothing to undo.
+
+export const UNDO_MS = 10_000;
+// A second tap this soon is the old "tap, Sure?, tap" habit, not a decision, so it's ignored.
+export const UNDO_GUARD_MS = 1000;
+
+export function undoState(undo, session, now) {
+  if (!undo || undo.after !== session) return 'none';
+  const since = now - undo.at;
+  if (since < 0 || since >= UNDO_MS) return 'none';
+  return since < UNDO_GUARD_MS ? 'guard' : 'ready';
+}
+
+export const resetLabel = (phase, undoing) => (undoing ? 'Undo' : phase === 'waiting' ? 'Cancel' : 'Reset');
+
+// What a tap on the Reset button does. The label is redrawn a few times a second, so a
+// button still showing "Undo" a moment after the offer ends undoes rather than resets;
+// a button showing Undo never resets.
+export function resetTap(undo, session, now, showingUndo) {
+  const state = undoState(undo, session, now);
+  if (state === 'guard') return 'ignore';
+  if (state === 'ready') return 'undo';
+  if (showingUndo) return undo?.after === session ? 'undo' : 'ignore';
+  return 'reset';
+}
+
+// After a Stop the main button turns into New gig, so the habit's second tap is ignored
+// there; after a Reset it's Start, which should work straight away.
+export const primaryBlocked = (undo, session, now) => undo?.kind === 'stop' && undoState(undo, session, now) === 'guard';
+
 // ---------- Add to Home Screen hint ----------
 // iPhones never offer to install a web app, so Setup explains how, but only in an
 // iPhone or iPad browser (iPadOS calls itself a Mac; the touch screen gives it away),
