@@ -750,6 +750,50 @@ body[data-phase="paid"] .poster { --ink: #FF6B1A; }
   .p-btn { min-height: 56px; }
 }
 
+/* ---------- Stand view: a phone on its side ---------- */
+/* On a music stand or a desk the phone often lies sideways. Then every look shows its
+   number, as big as the screen allows (--stand-max: its share of the screen height,
+   read by fitAmount), its status, what's next ("Break in 12:00") and its one note
+   ("The meter starts on its own."). No buttons to knock; turning the phone upright
+   brings them back. Touch phones only: iPads are taller, and a short desktop window
+   keeps its buttons. */
+@media (orientation: landscape) and (max-height: 500px) and (hover: none) and (pointer: coarse) {
+  .face {
+    max-width: none;
+    justify-content: center;
+    gap: 14px;
+    padding: max(12px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(28px, env(safe-area-inset-left));
+  }
+  .face .spacer, .face footer { display: none; }
+
+  .q-top, .q-head, .q-list > .q-row:not([data-show="hasNext"]) { display: none; }
+  .q-list:not(:has(> .q-row[data-show="hasNext"]:not([hidden]))) { display: none; }
+  .q-readout { gap: 14px; padding: 0; }
+  .q-amount { --stand-max: 0.46; }
+  .q-status { font-size: 24px; }
+
+  .fare { gap: 12px; }
+  .f-head, .f-top .f-key, .f-pair { display: none; }
+  .f-amount { --stand-max: 0.38; }
+
+  /* The paper keeps its total, its stamp and the log's last line (Running, Break, Stopped…). */
+  .stub { gap: 0; }
+  .s-paper { gap: 8px; }
+  .s-receipt, .s-head, .s-rule, .s-lines, .s-total .s-line, .s-log li:not(:last-child) { display: none; }
+  .s-stamp { margin: 4px 0 0; }
+  .s-amount { --stand-max: 0.34; }
+
+  .p-top, .p-sub, .p-grid > .p-cell:not([data-show="hasNext"]) { display: none; }
+  .p-grid:not(:has(> .p-cell[data-show="hasNext"]:not([hidden]))) { display: none; }
+  .p-amount { --stand-max: 0.42; }
+
+  /* Sideways, the receipt picture shrinks to fit the screen above Share. */
+  .receipt-img { width: auto; max-width: 100%; max-height: calc(100dvh - 232px); }
+  /* Previewing a look in Setup: the sheet docks to the right half, the look shows beside it. */
+  .sheet-backdrop.peek { justify-content: flex-end; }
+  .peek .sheet { max-width: 50%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

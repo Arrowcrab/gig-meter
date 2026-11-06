@@ -234,7 +234,7 @@ function fitAmount(status, decimals) {
   const width = box.clientWidth - parseFloat(boxStyle.paddingLeft) - parseFloat(boxStyle.paddingRight);
   const basisCents = Math.max(status.cents, status.capCents ?? 10000);
   const text = formatAmount(basisCents * 10 ** (decimals - 2), decimals);
-  const key = `${view.theme}|${text.length}|${width}`;
+  const key = `${view.theme}|${text.length}|${width}|${innerHeight}`;
   if (width <= 0 || key === view.fitKey) return;
   view.fitKey = key;
   const style = getComputedStyle(el);
@@ -244,7 +244,9 @@ function fitAmount(status, decimals) {
     fontSize: '100px', letterSpacing: `${spacing * 100}px`,
   });
   probe.textContent = text;
-  const max = parseFloat(style.getPropertyValue('--amount-max')) || 72;
+  // Sideways (the stand view) the cap is a share of the screen height instead.
+  const stand = parseFloat(style.getPropertyValue('--stand-max'));
+  const max = stand > 0 ? Math.floor(innerHeight * stand) : parseFloat(style.getPropertyValue('--amount-max')) || 72;
   el.style.fontSize = `${Math.min(max, Math.floor((width * 100) / probe.getBoundingClientRect().width))}px`;
 }
 
