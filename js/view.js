@@ -456,6 +456,51 @@ export function resetTap(undo, session, now, showingUndo) {
 // there; after a Reset it's Start, which should work straight away.
 export const primaryBlocked = (undo, session, now) => undo?.kind === 'stop' && undoState(undo, session, now) === 'guard';
 
+// ---------- saving Setup: keep the gig or start fresh ----------
+// Timing is how the gig starts and stops (by tap, or a schedule's date, times and breaks);
+// price is what it pays (amount, kind of pay, and a fee's planned length by tap).
+
+export function timingKey(config) {
+  const s = config.schedule || {};
+  const breaks = s.breaksOn === false ? [] : (s.breaks || []).map((b) => [b.start, Number(b.minutes)]);
+  return JSON.stringify([config.mode, config.mode === 'scheduled' ? [s.date, s.start, s.end, breaks] : null]);
+}
+
+export function priceKey(config) {
+  const fee = FORMATS[config.format]?.kind === 'flat';
+  return JSON.stringify([config.format, config.amountCents, fee && config.mode !== 'scheduled' ? config.plannedMinutes : null]);
+}
+
+// Saving Setup starts the meter over for a different gig: new timing, a schedule
+// switched back on, or new pay on a gig that's finished or paused (that's setting up
+// the next one: with the Pause button on, a gig rests at Paused after it ends). New
+// pay on a gig under way (earning, in overtime, on a scheduled break, or not started)
+// re-prices the whole gig and keeps it going. (The app also starts fresh on first run
+// and from New gig.)
+export function saveRestarts(session, config, now) {
+  if (config.mode === 'scheduled' && !session.scheduleArmed) return true;
+  if (timingKey(config) !== timingKey(session.config)) return true;
+  if (priceKey(config) === priceKey(session.config)) return false;
+  const status = getStatus(session, now);
+  return gigFinished(status) || status.phase === 'paused';
+}
+
+// Saving keeps the gig, but its new pay would finish it on the spot (a fee whose
+// planned length is already worked), so Save asks for a second tap.
+export function saveEndsGig(session, config, now) {
+  return !gigFinished(getStatus(session, now)) && gigFinished(getStatus({ ...session, config }, now));
+}
+
+// What saving does to the total of a gig it keeps, when it changes it.
+export function repriceNote(session, config, now) {
+  const before = getStatus(session, now);
+  const after = getStatus({ ...session, config }, now);
+  if (before.cents === after.cents) return '';
+  if (gigFinished(before)) return `Updates this gig: ${formatMoney(before.cents)} becomes ${formatMoney(after.cents)}.`;
+  const ends = gigFinished(after) ? `, which finishes it (${STATUS_TEXT[after.phase]})` : '';
+  return `Updates this gig, no restart: ${formatMoney(before.cents)} so far becomes ${formatMoney(after.cents)}${ends}.`;
+}
+
 // ---------- Add to Home Screen hint ----------
 // iPhones never offer to install a web app, so Setup explains how, but only in an
 // iPhone or iPad browser (iPadOS calls itself a Mac; the touch screen gives it away),

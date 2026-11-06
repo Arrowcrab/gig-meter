@@ -23,6 +23,7 @@ import {
   historyEntry, addHistory, removeHistory, readHistory, historyTotals, historyRow,
   wantsInstallHint, receipt, receiptText, receiptFileName, gigFinished,
   undoState, resetLabel, resetTap, primaryBlocked,
+  saveRestarts as restartsOnSave, repriceNote, saveEndsGig,
 } from './view.js';
 
 const STORAGE_KEY = 'gig-meter:v1';
@@ -42,6 +43,11 @@ let reloadWhenSetupCloses = false;
 let rolledDate = null; // { saved, shown } when Setup moved an ended session's date forward
 let timesShown = { start: '', end: '' }; // the Start/Stop times Setup opened with, to spot edits
 let newGigSetup = false; // Setup was opened from "New gig", so Save always starts fresh
+// What Setup's Save last said it would do ('restart', 'keep' or 'ends'), when that was
+// worked out, and whether errors were on show. The clock can change the answer while
+// Setup is open (a fee gets earned), so Setup refreshes it, and a Save that would now
+// do something else shows the new answer first.
+const formShown = { decision: '', at: 0, errors: false };
 
 // ---------- small helpers ----------
 
@@ -317,6 +323,7 @@ function frame() {
   cancelAnimationFrame(loop.raf);
   clearTimeout(loop.timer);
   loop.timer = setTimeout(frame, document.hidden ? 1000 : 250);
+  if (!$('setup').hidden && Date.now() - formShown.at >= 1000) updateForm(formShown.errors);
   const status = render(Date.now());
   if (!document.hidden && status.running) loop.raf = requestAnimationFrame(frame);
 }
@@ -546,23 +553,6 @@ function readForm() {
   return config;
 }
 
-// Only changes to pay or timing start a fresh meter; a new name, look, decimal places
-// or Pause button setting keep it running. Fields that don't apply to the chosen setup
-// are ignored, and only breaks that count (unpaid breaks switched on) are compared.
-function payKey(config) {
-  const flat = FORMATS[config.format]?.kind === 'flat';
-  const scheduled = config.mode === 'scheduled';
-  const s = config.schedule || {};
-  const breaks = s.breaksOn === false ? [] : (s.breaks || []).map((b) => [b.start, Number(b.minutes)]);
-  return JSON.stringify([
-    config.format,
-    config.amountCents,
-    config.mode,
-    !scheduled && flat ? config.plannedMinutes : null,
-    scheduled ? [s.date, s.start, s.end, breaks] : null,
-  ]);
-}
-
 // The form as it would be saved without Setup's automatic date change: an ended
 // session's date shown moved forward but left untouched isn't a change.
 function asSaved(config) {
@@ -570,11 +560,12 @@ function asSaved(config) {
   return { ...config, schedule: { ...config.schedule, date: rolledDate.saved } };
 }
 
-// Saving restarts the meter when pay or timing changed, to switch a schedule that
-// Reset turned off back on, or when Setup was opened from "New gig".
+// Saving starts a fresh meter on first run, from "New gig", and for a different gig
+// (new timing, a schedule switched back on, new pay once a gig is finished: see
+// saveRestarts in view.js). New pay on a gig under way re-prices it and keeps it going;
+// a new name, look, decimal places or Pause button setting never restart.
 function saveRestarts(config) {
-  const rearm = config.mode === 'scheduled' && !session.scheduleArmed;
-  return !hasSaved || newGigSetup || rearm || payKey(asSaved(config)) !== payKey(session.config);
+  return !hasSaved || newGigSetup || restartsOnSave(session, asSaved(config), Date.now());
 }
 
 // Once the gig on the meter is past its planned end (in overtime, or finished), its
@@ -637,6 +628,7 @@ function formError(config, now) {
 function updateForm(showErrors = false) {
   const now = Date.now();
   const config = readForm();
+  Object.assign(formShown, { decision: saveDecision(config, now), at: now, errors: showErrors });
   const format = FORMATS[config.format];
   setText($('f-unit'), UNITS[config.format]);
   $('format-note').hidden = !format.note;
@@ -689,9 +681,11 @@ function updateForm(showErrors = false) {
   } else if (timesNote) {
     setText(summary, timesNote);
   } else {
+    // Saving keeps the gig: say what it does to the total so far, when it changes it.
+    const note = saveRestarts(config) ? '' : repriceNote(session, asSaved(config), now);
     const preview = getStatus(newSession(config), now);
     const rate = rateText(preview);
-    setText(summary, preview.plannedMs ? `${durationLong(preview.plannedMs)} of work · ${rate}` : rate);
+    setText(summary, note || (preview.plannedMs ? `${durationLong(preview.plannedMs)} of work · ${rate}` : rate));
   }
 
   const label = saveLabel(config, now);
@@ -1154,10 +1148,18 @@ function moneyAtRisk(config, now) {
   return hasSaved && live.cents > 0 && live.phase !== 'paid' && live.phase !== 'over' ? live.cents : 0;
 }
 
+// 'restart' (a fresh gig), 'keep' (this gig, maybe re-priced) or 'ends' (this gig,
+// re-priced in a way that finishes it on the spot).
+function saveDecision(config, now) {
+  if (saveRestarts(config)) return 'restart';
+  return saveEndsGig(session, asSaved(config), now) ? 'ends' : 'keep';
+}
+
 function saveLabel(config, now) {
   const cents = moneyAtRisk(config, now);
-  if (!cents) return 'Save';
-  return now < saveConfirmUntil ? `Tap again · ${formatMoney(cents)} goes to History` : 'Save & restart meter';
+  if (cents) return now < saveConfirmUntil ? `Tap again · ${formatMoney(cents)} goes to History` : 'Save & restart meter';
+  if (saveDecision(config, now) === 'ends') return now < saveConfirmUntil ? 'Tap again · this finishes the gig' : 'Save & finish gig';
+  return 'Save';
 }
 
 function openSetup({ newGig = false } = {}) {
@@ -1240,7 +1242,12 @@ form.addEventListener('submit', (e) => {
   const config = readForm();
   if (formError(config, Date.now())) return refuseSave();
   const now = Date.now();
-  if (moneyAtRisk(config, now) && now >= saveConfirmUntil) {
+  if (saveDecision(config, now) !== formShown.decision) {
+    // What Save does has changed since the screen said (the clock moved on): show it first.
+    saveConfirmUntil = 0;
+    return updateForm();
+  }
+  if ((moneyAtRisk(config, now) || formShown.decision === 'ends') && now >= saveConfirmUntil) {
     saveConfirmUntil = now + 4000;
     updateForm();
     setTimeout(() => updateForm(), 4100);
