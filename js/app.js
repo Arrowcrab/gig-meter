@@ -5,6 +5,12 @@ import {
   parseMoney,
   formatMoney,
   formatAmount,
+  CURRENCIES,
+  currencyOf,
+  currencySymbol,
+  currencyForRegion,
+  setMoneyLocale,
+  decimalMark,
   buildSchedule,
   validateConfig,
   newSession,
@@ -55,13 +61,22 @@ const pad = (n) => String(n).padStart(2, '0');
 const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
 const decimalsOf = (config) => (DECIMAL_CHOICES.includes(config.decimals) ? config.decimals : DEFAULT_DECIMALS);
 
-function rateText(status) {
+// Amounts are written the way this phone writes numbers ("1.234,56 €" in Germany).
+setMoneyLocale(navigator.language || 'en-US');
+const DOLLARS = new Set(['USD', 'CAD', 'AUD', 'NZD', 'SGD', 'HKD']);
+
+// "$1.40 a minute · 2.3¢ a second": cents for dollars, pence for pounds, plain
+// amounts ("€0.023 a second", "€0.01 every 1.5 sec") for other currencies.
+function rateText(status, currency) {
   const perSecond = status.centsPerHour / 3600;
   if (!perSecond) return '';
-  const tick = perSecond >= 1
-    ? `${perSecond.toFixed(perSecond < 10 ? 1 : 0)}¢ a second`
-    : `a cent every ${(1 / perSecond).toFixed(1 / perSecond < 10 ? 1 : 0)} sec`;
-  return `${formatMoney(Math.floor(status.centsPerHour / 60))} a minute · ${tick}`;
+  const minor = currency === 'GBP' ? 'p' : DOLLARS.has(currency) ? '¢' : '';
+  const oneCent = currency === 'GBP' ? 'a penny' : DOLLARS.has(currency) ? 'a cent' : formatMoney(1, currency);
+  const num = (n, places) => n.toFixed(places).replace('.', decimalMark());
+  let tick;
+  if (perSecond >= 1) tick = minor ? `${num(perSecond, perSecond < 10 ? 1 : 0)}${minor} a second` : `${formatAmount(Math.round(perSecond * 10), 3, currency)} a second`;
+  else tick = `${oneCent} every ${num(1 / perSecond, 1 / perSecond < 10 ? 1 : 0)} sec`;
+  return `${formatMoney(Math.floor(status.centsPerHour / 60), currency)} a minute · ${tick}`;
 }
 
 const todayISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -87,6 +102,7 @@ function defaultConfig() {
     manualPause: false,
     decimals: DEFAULT_DECIMALS,
     theme: DEFAULT_THEME,
+    currency: currencyForRegion(navigator.language), // a new install: the phone's region
   };
 }
 
@@ -233,7 +249,7 @@ function fitAmount(status, decimals) {
   const boxStyle = getComputedStyle(box);
   const width = box.clientWidth - parseFloat(boxStyle.paddingLeft) - parseFloat(boxStyle.paddingRight);
   const basisCents = Math.max(status.cents, status.capCents ?? 10000);
-  const text = formatAmount(basisCents * 10 ** (decimals - 2), decimals);
+  const text = formatAmount(basisCents * 10 ** (decimals - 2), decimals, currencyOf(session.config));
   const key = `${view.theme}|${text.length}|${width}|${innerHeight}`;
   if (width <= 0 || key === view.fitKey) return;
   view.fitKey = key;
@@ -254,7 +270,7 @@ function fitAmount(status, decimals) {
 function renderCents(status) {
   if (status.cents === view.cents) return;
   const el = view.parts.amount;
-  el.setAttribute('aria-label', formatMoney(status.cents));
+  el.setAttribute('aria-label', formatMoney(status.cents, currencyOf(session.config)));
   const dollars = Math.floor(status.cents / 100);
   if (view.dollars != null && dollars > view.dollars && !reducedMotion.matches) {
     el.classList.remove('bump');
@@ -440,6 +456,9 @@ document.fonts?.addEventListener?.('loadingdone', () => { view.fitKey = ''; kick
 
 // ---------- setup sheet ----------
 
+// The currency picker under the symbol in front of the pay amount.
+for (const { code, name } of CURRENCIES) $('f-currency').append(new Option(`${name} (${currencySymbol(code)})`, code));
+
 for (const [key, format] of Object.entries(FORMATS)) {
   const label = document.createElement('label');
   const input = Object.assign(document.createElement('input'), { type: 'radio', name: 'format', value: key });
@@ -460,8 +479,8 @@ function breakRow(b) {
   return li;
 }
 
-// Money typed into a box: "15" or "12.50" back from whole cents.
-const moneyText = (cents) => (cents ? (cents / 100).toFixed(2).replace(/\.00$/, '') : '');
+// Money typed into a box: "15" or "12.50" ("12,50" where the phone writes it so) back from whole cents.
+const moneyText = (cents) => (cents ? (cents / 100).toFixed(2).replace(/\.00$/, '').replace('.', decimalMark()) : '');
 
 function extraRow(x = {}) {
   const li = $('extra-row').content.firstElementChild.cloneNode(true);
@@ -480,7 +499,8 @@ const overtimeApplies = (config) => FORMATS[config.format]?.kind === 'flat' || c
 function fillForm(config) {
   $('f-name').value = config.name || '';
   form.elements.format.value = config.format;
-  $('f-amount').value = config.amountCents ? (config.amountCents / 100).toFixed(2).replace(/\.00$/, '') : '';
+  $('f-currency').value = currencyOf(config);
+  $('f-amount').value = moneyText(config.amountCents);
   const planned = config.plannedMinutes > 0 ? config.plannedMinutes : 180;
   $('f-hours').value = Math.floor(planned / 60);
   $('f-minutes').value = planned % 60;
@@ -528,6 +548,7 @@ function readForm() {
     name: $('f-name').value.trim().slice(0, 40),
     format: form.elements.format.value,
     amountCents: parseMoney($('f-amount').value) ?? 0,
+    currency: currencyOf({ currency: $('f-currency').value }),
     plannedMinutes: Math.round(hours * 60 + minutes),
     mode: form.elements.mode.value,
     schedule: {
@@ -632,6 +653,9 @@ function updateForm(showErrors = false) {
   const config = readForm();
   Object.assign(formShown, { decision: saveDecision(config, now), at: now, errors: showErrors });
   const format = FORMATS[config.format];
+  // Every money box in Setup shows the gig's currency symbol.
+  const symbol = currencySymbol(config.currency);
+  for (const el of form.querySelectorAll('.cur')) setText(el, symbol);
   setText($('f-unit'), UNITS[config.format]);
   $('format-note').hidden = !format.note;
   setText($('format-note'), format.note || '');
@@ -671,7 +695,7 @@ function updateForm(showErrors = false) {
     const base = mode === 'begin' && saveRestarts(config) ? newSession(config) : { ...session, config: asSaved(config) };
     const result = applyTimes(base, mode, now);
     if (result.error) timesError = result.error;
-    else timesNote = `With these times: ${formatMoney(getStatus(result.session, now).cents)} earned so far`;
+    else timesNote = `With these times: ${formatMoney(getStatus(result.session, now).cents, config.currency)} earned so far`;
   }
 
   summary.classList.toggle('error', Boolean(error || timesError) && (showErrors || config.amountCents > 0 || Boolean(timesError)));
@@ -686,7 +710,7 @@ function updateForm(showErrors = false) {
     // Saving keeps the gig: say what it does to the total so far, when it changes it.
     const note = saveRestarts(config) ? '' : repriceNote(session, asSaved(config), now);
     const preview = getStatus(newSession(config), now);
-    const rate = rateText(preview);
+    const rate = rateText(preview, config.currency);
     setText(summary, note || (preview.plannedMs ? `${durationLong(preview.plannedMs)} of work · ${rate}` : rate));
   }
 
@@ -785,11 +809,28 @@ function renderHistory() {
   const newestFirst = [...pastGigs].sort((a, b) => b.startedAt - a.startedAt); // a corrected time can reorder them
   const all = current ? [current, ...newestFirst] : newestFirst;
   const totals = historyTotals(all, now);
-  setText($('t-week'), formatMoney(totals.week));
-  setText($('t-month'), formatMoney(totals.month));
-  setText($('t-year'), formatMoney(totals.year));
+  // One line per currency (never adding dollars to euros), the current gig's first.
+  const mine = currencyOf(session.config);
+  const sumText = (sums) => {
+    const codes = Object.keys(sums).sort((a, b) => (a === mine ? -1 : b === mine ? 1 : sums[b] - sums[a]));
+    return codes.length ? codes.map((c) => formatMoney(sums[c], c)).join('\n') : formatMoney(0, mine);
+  };
+  setText($('t-week'), sumText(totals.week));
+  setText($('t-month'), sumText(totals.month));
+  setText($('t-year'), sumText(totals.year));
+  fitTotals();
   $('history-empty').hidden = all.length > 0;
   $('history-list').replaceChildren(...all.map((entry) => historyItem(entry, now, entry === current)));
+}
+
+// Long totals (or a symbol written after the number) shrink to fit their tile. Only
+// measurable while the sheet is showing, so it also runs right after it opens.
+function fitTotals() {
+  for (const id of ['t-week', 't-month', 't-year']) {
+    const el = $(id);
+    el.style.fontSize = '';
+    for (let size = 17; el.scrollWidth > el.clientWidth && size > 11; size -= 1) el.style.fontSize = `${size - 1}px`;
+  }
 }
 
 function historyItem(entry, now, isCurrent) {
@@ -822,6 +863,7 @@ const closeHistory = () => { $('history').hidden = true; };
 $('open-history').addEventListener('click', () => {
   renderHistory();
   $('history').hidden = false;
+  fitTotals();
   $('history').querySelector('.sheet').scrollTop = 0;
 });
 $('close-history').addEventListener('click', closeHistory);
@@ -1159,7 +1201,7 @@ function saveDecision(config, now) {
 
 function saveLabel(config, now) {
   const cents = moneyAtRisk(config, now);
-  if (cents) return now < saveConfirmUntil ? `Tap again · ${formatMoney(cents)} goes to History` : 'Save & restart meter';
+  if (cents) return now < saveConfirmUntil ? `Tap again · ${formatMoney(cents, currencyOf(session.config))} goes to History` : 'Save & restart meter';
   if (saveDecision(config, now) === 'ends') return now < saveConfirmUntil ? 'Tap again · this finishes the gig' : 'Save & finish gig';
   return 'Save';
 }
@@ -1185,6 +1227,13 @@ function closeSetup() {
   kick();
   if (reloadWhenSetupCloses) location.reload();
 }
+
+// A tap anywhere in a money box (other than the currency picker) goes to its amount.
+form.addEventListener('click', (e) => {
+  const box = e.target.closest('.money-input');
+  if (!box || e.target.closest('select, input, button')) return;
+  box.querySelector('input')?.focus();
+});
 
 form.addEventListener('input', () => updateForm());
 form.addEventListener('change', (e) => {

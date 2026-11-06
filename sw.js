@@ -10,7 +10,7 @@
 // first time a look is used online, in a separate cache that app updates leave alone,
 // so the look keeps its fonts offline afterwards.
 
-const CACHE = 'gig-meter-v19';
+const CACHE = 'gig-meter-v20';
 const FONT_CACHE = 'gig-meter-fonts';
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const FILES = [

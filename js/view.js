@@ -1,7 +1,7 @@
 // Screen text for every look. Pure: given a session, its status and the time, it
 // returns the strings and numbers the four looks show, so they all agree.
 
-import { FORMATS, formatAmount, formatMoney, formatClock, unitsEarned, history, getStatus, validateConfig } from './meter.js';
+import { FORMATS, formatAmount, formatMoney, formatPrice, currencyOf, CURRENCIES, formatClock, unitsEarned, history, getStatus, validateConfig } from './meter.js';
 
 // The looks the app can wear. `fonts` is the Google Fonts family list each needs
 // (loaded only when that look is on); `color` is its top-of-screen color.
@@ -80,8 +80,9 @@ export function durationLong(ms) {
   return [h && `${h} hr`, m && `${m} min`].filter(Boolean).join(' ') || '0 min';
 }
 
-// $210 when whole, $210.50 otherwise.
-const formatPay = (cents) => (cents % 100 ? formatMoney(cents) : `$${(cents / 100).toLocaleString('en-US')}`);
+// Records filed before currencies existed are dollars.
+const KNOWN = new Set(CURRENCIES.map((c) => c.code));
+const entryCurrency = (entry) => (KNOWN.has(entry?.currency) ? entry.currency : 'USD');
 
 const receiptDate = (ms) => {
   const d = new Date(ms);
@@ -94,6 +95,8 @@ export const gigFinished = (status) => status.phase === 'paid' || status.phase =
 
 export function viewModel(session, status, now, decimals) {
   const { config } = session;
+  const cur = currencyOf(config);
+  const money = (cents) => formatMoney(cents, cur);
   const isFlat = status.capCents != null;
   const paid = status.phase === 'paid';
   const scheduleOff = config.mode === 'scheduled' && !session.scheduleArmed && !paid && status.phase !== 'over';
@@ -104,8 +107,10 @@ export function viewModel(session, status, now, decimals) {
 
   // The rate per minute to the nearest ten-thousandth, trailing zeros dropped: $1.40, $1.3125.
   const { amountCents, perMs } = status.payRate;
-  const perMinuteUnits = perMs > 0 ? Math.round((amountCents * 100 * 60_000) / perMs) : 0;
-  const perMinute = formatAmount(perMinuteUnits, 4).replace(/(\.\d{2}\d*?)0+$/, '$1');
+  let perMinuteUnits = perMs > 0 ? Math.round((amountCents * 100 * 60_000) / perMs) : 0;
+  let places = 4;
+  while (places > 2 && perMinuteUnits % 10 === 0) { perMinuteUnits /= 10; places -= 1; }
+  const perMinute = formatAmount(perMinuteUnits, places, cur);
 
   let next = { hasNext: false, nextText: '', nextShortLabel: '', nextShortValue: '', nextRowLabel: '', nextRowValue: '', stubNext: '' };
   if (status.next) {
@@ -125,7 +130,7 @@ export function viewModel(session, status, now, decimals) {
     const paidAt = past.at(-1)?.t ?? now;
     next = {
       hasNext: true,
-      nextText: status.cents > status.capCents ? `${formatMoney(status.capCents)} fee earned in full` : `All ${formatMoney(status.capCents)} earned`,
+      nextText: status.cents > status.capCents ? `${money(status.capCents)} fee earned in full` : `All ${money(status.capCents)} earned`,
       nextShortLabel: 'Finished',
       nextShortValue: clockTime(paidAt),
       nextRowLabel: 'Finished',
@@ -169,23 +174,23 @@ export function viewModel(session, status, now, decimals) {
     status: STATUS_TEXT[status.phase],
     lamp: LAMP_TEXT[status.phase],
     gigName: config.name || 'Your gig',
-    payShort: `${formatPay(config.amountCents)} ${UNITS[config.format]}`,
-    gigPay: `${formatPay(config.amountCents)} ${UNITS[config.format]}${isFlat ? ` · ${durationLong(status.plannedMs)} of work` : ''}`,
-    amount: formatAmount(unitsEarned(status, decimals), decimals),
+    payShort: `${formatPrice(config.amountCents, cur)} ${UNITS[config.format]}`,
+    gigPay: `${formatPrice(config.amountCents, cur)} ${UNITS[config.format]}${isFlat ? ` · ${durationLong(status.plannedMs)} of work` : ''}`,
+    amount: formatAmount(unitsEarned(status, decimals), decimals, cur),
     worked: formatClock(status.workedMs),
     isFlat,
-    owed: isFlat ? formatMoney(status.capCents - (status.baseCents ?? status.cents)) : '',
+    owed: isFlat ? money(status.capCents - (status.baseCents ?? status.cents)) : '',
     hasExtras: extrasCents > 0,
-    extras: formatMoney(extrasCents),
+    extras: money(extrasCents),
     hasOvertime: status.overtimeMs > 0 || status.phase === 'overtime',
     hasAddOns: extrasCents > 0 || status.overtimeMs > 0 || status.phase === 'overtime',
-    overtime: formatMoney(status.overtimeCents ?? 0),
+    overtime: money(status.overtimeCents ?? 0),
     pct: `${Math.floor(progress * 100)}%`,
     ledLit: Math.floor(progress * 20),
     rateLong: `${perMinute} a minute`,
-    rateShort: `${formatMoney(Math.floor(status.centsPerHour / 60))}/min`,
+    rateShort: `${money(Math.floor(status.centsPerHour / 60))}/min`,
     payLabel: PAY_LABEL[config.format],
-    payValue: `${formatMoney(config.amountCents)}${PAY_SUFFIX[config.format] ?? ''}`,
+    payValue: `${money(config.amountCents)}${PAY_SUFFIX[config.format] ?? ''}`,
     planned: isFlat ? formatClock(status.plannedMs) : '',
     ...next,
     primary,
@@ -207,7 +212,7 @@ export function viewModel(session, status, now, decimals) {
 
 export const SAVED_MAX = 12;
 
-const savedPay = (config) => `${formatPay(config.amountCents)} ${UNITS[config.format]}`;
+const savedPay = (config) => `${formatPrice(config.amountCents, currencyOf(config))} ${UNITS[config.format]}`;
 const time12 = (hhmm) => {
   const [h, m] = String(hhmm).split(':').map(Number);
   return `${h % 12 || 12}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
@@ -228,7 +233,7 @@ export function savedSummary(config) {
 // unnamed ones when their pay and times match.
 const savedKey = (config) => {
   const name = (config.name || '').trim().toLowerCase();
-  return name ? `name:${name}` : `pay:${savedSummary(config)}`;
+  return name ? `name:${name}` : `pay:${savedSummary(config)}|${currencyOf(config)}`;
 };
 
 export const matchSaved = (list, config) => list.find((e) => savedKey(e.config) === savedKey(config)) ?? null;
@@ -281,6 +286,7 @@ export function historyEntry(session, now, id) {
     title: savedTitle(session.config),
     pay: savedPay(session.config),
     cents: status.cents,
+    currency: currencyOf(session.config),
     workedMs: status.workedMs,
     startedAt: moments[0]?.t ?? Math.floor(now),
     endedAt: status.running || !last ? Math.floor(now) : last.t,
@@ -329,14 +335,16 @@ export function readHistory(raw) {
     seen.add(e.id);
     const { id, title, pay, cents, workedMs, startedAt, endedAt } = e;
     const breakdown = readBreakdown(e.breakdown, cents);
-    list.push({ id, title, pay, cents, workedMs, startedAt, endedAt, ...(breakdown && { breakdown }) });
+    const currency = KNOWN.has(e.currency) ? e.currency : null;
+    list.push({ id, title, pay, cents, workedMs, startedAt, endedAt, ...(breakdown && { breakdown }), ...(currency && { currency }) });
     if (list.length === HISTORY_MAX) break;
   }
   return list;
 }
 
-// Earned this week (from Monday 00:00), this month and this year. A gig counts on
-// the day it started.
+// Earned this week (from Monday 00:00), this month and this year, per currency (never
+// adding dollars to euros): { week: { USD: 1000, EUR: 500 }, … }. A gig counts on the
+// day it started.
 export function historyTotals(list, now) {
   const d = new Date(now);
   const from = {
@@ -344,7 +352,11 @@ export function historyTotals(list, now) {
     month: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
     year: new Date(d.getFullYear(), 0, 1).getTime(),
   };
-  const total = (start) => list.reduce((sum, e) => sum + (e.startedAt >= start ? e.cents : 0), 0);
+  const total = (start) => {
+    const sums = {};
+    for (const e of list) if (e.startedAt >= start) sums[entryCurrency(e)] = (sums[entryCurrency(e)] ?? 0) + e.cents;
+    return sums;
+  };
   return { week: total(from.week), month: total(from.month), year: total(from.year) };
 }
 
@@ -363,7 +375,7 @@ export function historyRow(entry, now) {
   return {
     title: entry.title,
     sub: `${dayLabel(entry.startedAt, now)}, ${time12At(entry.startedAt)} · ${durationLong(entry.workedMs)}`,
-    amount: formatMoney(entry.cents),
+    amount: formatMoney(entry.cents, entryCurrency(entry)),
   };
 }
 
@@ -378,6 +390,7 @@ const longDate = (ms) => { const d = new Date(ms); return `${DAYS[d.getDay()]} $
 const shortDate = (ms) => { const d = new Date(ms); return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 
 export function receipt(entry, now, live = false) {
+  const cur = entryCurrency(entry);
   // A gig still going is "as of" now; a finished one ends at its last moment.
   const end = live ? Math.floor(now) : entry.endedAt;
   const sameDay = new Date(end).toDateString() === new Date(entry.startedAt).toDateString();
@@ -385,12 +398,12 @@ export function receipt(entry, now, live = false) {
   const b = entry.breakdown;
   const money = [];
   if (b && (b.extras.length || b.overtimeMs > 0)) {
-    money.push(['Base pay', formatMoney(b.baseCents)]);
+    money.push(['Base pay', formatMoney(b.baseCents, cur)]);
     if (b.overtimeMs > 0) {
       const label = b.overtimeMs >= 60000 ? `Overtime · ${durationLong(b.overtimeMs)}` : 'Overtime';
-      money.push([label, formatMoney(entry.cents - b.baseCents - extrasSum(b.extras))]);
+      money.push([label, formatMoney(entry.cents - b.baseCents - extrasSum(b.extras), cur)]);
     }
-    for (const x of b.extras) money.push([x.label || 'Extra', formatMoney(x.cents)]);
+    for (const x of b.extras) money.push([x.label || 'Extra', formatMoney(x.cents, cur)]);
   }
   return {
     title: namedTitle(entry),
@@ -398,7 +411,7 @@ export function receipt(entry, now, live = false) {
     rows: [['Pay', entry.pay], ['Started', time12At(entry.startedAt)], [live ? 'As of' : 'Finished', endTime], ['Worked', durationLong(entry.workedMs)]],
     money,
     totalLabel: live ? 'EARNED SO FAR' : 'TOTAL EARNED',
-    total: formatMoney(entry.cents),
+    total: formatMoney(entry.cents, cur),
     stamp: !live && b?.feePaid === true,
   };
 }
@@ -468,7 +481,7 @@ export function timingKey(config) {
 
 export function priceKey(config) {
   const fee = FORMATS[config.format]?.kind === 'flat';
-  return JSON.stringify([config.format, config.amountCents, fee && config.mode !== 'scheduled' ? config.plannedMinutes : null]);
+  return JSON.stringify([config.format, config.amountCents, fee && config.mode !== 'scheduled' ? config.plannedMinutes : null, currencyOf(config)]);
 }
 
 // Saving Setup starts the meter over for a different gig: new timing, a schedule
@@ -495,10 +508,12 @@ export function saveEndsGig(session, config, now) {
 export function repriceNote(session, config, now) {
   const before = getStatus(session, now);
   const after = getStatus({ ...session, config }, now);
-  if (before.cents === after.cents) return '';
-  if (gigFinished(before)) return `Updates this gig: ${formatMoney(before.cents)} becomes ${formatMoney(after.cents)}.`;
+  const was = formatMoney(before.cents, currencyOf(session.config));
+  const becomes = formatMoney(after.cents, currencyOf(config));
+  if (before.cents === after.cents && currencyOf(session.config) === currencyOf(config)) return '';
+  if (gigFinished(before)) return `Updates this gig: ${was} becomes ${becomes}.`;
   const ends = gigFinished(after) ? `, which finishes it (${STATUS_TEXT[after.phase]})` : '';
-  return `Updates this gig, no restart: ${formatMoney(before.cents)} so far becomes ${formatMoney(after.cents)}${ends}.`;
+  return `Updates this gig, no restart: ${was} so far becomes ${becomes}${ends}.`;
 }
 
 // ---------- Add to Home Screen hint ----------

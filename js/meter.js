@@ -18,28 +18,163 @@ export const FORMATS = {
   yearly:  { label: 'Yearly salary', kind: 'rate', unitMs: 52 * 40 * HOUR, unit: 'year', note: 'Assumes 40-hour weeks, 52 weeks a year.' },
 };
 
-// "$1,250.50" → 125050. Parsed as text so 0.015 rounds to 2 cents, not 1.
-export function parseMoney(text) {
-  const cleaned = String(text ?? '').replace(/[$,\s]/g, '');
-  const match = /^(\d*)(?:\.(\d*))?$/.exec(cleaned);
-  if (!match || cleaned === '' || cleaned === '.') return null;
-  const frac = ((match[2] || '') + '000').slice(0, 3);
-  const cents = Number(match[1] || '0') * 100 + Number(frac.slice(0, 2)) + (Number(frac[2]) >= 5 ? 1 : 0);
+// ---------- money ----------
+// Every amount is whole cents (hundredths of the gig's currency). The currencies on
+// offer all have cents. They're written the way the phone writes numbers (its region
+// settings), always in Latin digits: "$1,234.56" on a US phone, "1.234,56 €" on a German
+// one. The phone's own currency gets the short symbol; another country's dollar is
+// labelled ("CA$" on a US phone, "US$" on a Canadian one), so they never look alike.
+// The app sets the phone's style once at start; pure code and tests default to US style.
+
+export const CURRENCIES = [
+  { code: 'USD', name: 'US dollar' },
+  { code: 'EUR', name: 'Euro' },
+  { code: 'GBP', name: 'British pound' },
+  { code: 'CAD', name: 'Canadian dollar' },
+  { code: 'AUD', name: 'Australian dollar' },
+  { code: 'BRL', name: 'Brazilian real' },
+  { code: 'DKK', name: 'Danish krone' },
+  { code: 'HKD', name: 'Hong Kong dollar' },
+  { code: 'INR', name: 'Indian rupee' },
+  { code: 'MXN', name: 'Mexican peso' },
+  { code: 'NZD', name: 'New Zealand dollar' },
+  { code: 'NOK', name: 'Norwegian krone' },
+  { code: 'PLN', name: 'Polish złoty' },
+  { code: 'SGD', name: 'Singapore dollar' },
+  { code: 'ZAR', name: 'South African rand' },
+  { code: 'SEK', name: 'Swedish krona' },
+  { code: 'CHF', name: 'Swiss franc' },
+];
+export const DEFAULT_CURRENCY = 'USD';
+const CODES = new Set(CURRENCIES.map((c) => c.code));
+export const currencyOf = (config) => (CODES.has(config?.currency) ? config.currency : DEFAULT_CURRENCY);
+
+let moneyLocale = 'en-US';
+const styles = new Map();
+
+// Use the phone's way of writing numbers (e.g. navigator.language); ignored if unusable.
+export function setMoneyLocale(locale) {
+  try {
+    new Intl.NumberFormat(locale);
+    moneyLocale = locale || 'en-US';
+  } catch {
+    moneyLocale = 'en-US';
+  }
+}
+
+// How one currency is written in one style: what goes before and after the digits,
+// the decimal mark, and the digit grouping (taken from the same formatter, so the
+// digits themselves are never rounded through a decimal number).
+function moneyStyle(currency, locale = moneyLocale) {
+  const code = CODES.has(currency) ? currency : DEFAULT_CURRENCY;
+  const key = `${locale}|${code}`;
+  let style = styles.get(key);
+  if (!style) {
+    const options = { style: 'currency', currency: code, numberingSystem: 'latn' };
+    let full;
+    try {
+      full = new Intl.NumberFormat(locale, options);
+    } catch {
+      full = new Intl.NumberFormat('en-US', options);
+    }
+    const parts = full.formatToParts(1234567.5);
+    const first = parts.findIndex((p) => p.type === 'integer');
+    let last = first;
+    parts.forEach((p, i) => { if (['integer', 'group', 'decimal', 'fraction'].includes(p.type)) last = i; });
+    const whole = new Intl.NumberFormat(full.resolvedOptions().locale, { ...options, minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    // Right-to-left languages add invisible direction marks; inside this left-to-right
+    // page they only shift the number, so they're dropped.
+    const clean = (text) => text.replace(/[\u200e\u200f\u061c]/g, '');
+    style = {
+      prefix: clean(parts.slice(0, first).map((p) => p.value).join('')),
+      suffix: clean(parts.slice(last + 1).map((p) => p.value).join('')),
+      decimal: parts.find((p) => p.type === 'decimal')?.value ?? '.',
+      group: parts.find((p) => p.type === 'group')?.value ?? ',',
+      symbol: clean(parts.find((p) => p.type === 'currency')?.value ?? '$'),
+      digits: (n) => whole.formatToParts(n).filter((p) => p.type === 'integer' || p.type === 'group').map((p) => p.value).join(''),
+    };
+    styles.set(key, style);
+  }
+  return style;
+}
+
+export const currencySymbol = (currency, locale = moneyLocale) => moneyStyle(currency, locale).symbol;
+// The decimal mark the phone uses ("." or ","), for showing amounts in Setup's boxes.
+export const decimalMark = (locale = moneyLocale) => moneyStyle(DEFAULT_CURRENCY, locale).decimal;
+
+// units are whole 10^-decimals of the currency: formatAmount(2187, 5) → "$0.02187".
+export function formatAmount(units, decimals = 2, currency = DEFAULT_CURRENCY, locale = moneyLocale) {
+  const scale = 10 ** decimals;
+  const style = moneyStyle(currency, locale);
+  const fraction = String(units % scale).padStart(decimals, '0');
+  return `${style.prefix}${style.digits(Math.floor(units / scale))}${style.decimal}${fraction}${style.suffix}`;
+}
+
+export const formatMoney = (cents, currency = DEFAULT_CURRENCY, locale = moneyLocale) => formatAmount(cents, 2, currency, locale);
+
+// "$210" when whole, "$210.50" otherwise.
+export function formatPrice(cents, currency = DEFAULT_CURRENCY, locale = moneyLocale) {
+  if (cents % 100) return formatMoney(cents, currency, locale);
+  const style = moneyStyle(currency, locale);
+  return `${style.prefix}${style.digits(cents / 100)}${style.suffix}`;
+}
+
+// "$1,250.50" → 125050, "12,50" → 1250. Parsed as text so 0.015 rounds to 2 cents,
+// not 1. Either "." or "," can be the decimal mark: with both, the last one is; a lone
+// one before exactly three digits is a thousands mark only where the phone groups
+// digits that way ("1,250" in the US, "1.250" in Germany) and the number doesn't start
+// with 0. Thousands groups (also spaces and apostrophes) must be three digits (Indian
+// two-digit groups before the last three are fine). Currency symbols and words are
+// ignored; a minus, a ¢ or anything else means it isn't an amount.
+export function parseMoney(text, locale = moneyLocale) {
+  // An Arabic or Persian keypad types its own digits and marks: read them as 0–9, "." and ",".
+  const raw = String(text ?? '')
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0))
+    .replace(/٫/g, '.')
+    .replace(/٬/g, ',');
+  if (/[¢-]/.test(raw)) return null;
+  const t = raw.replace(/\p{Sc}/gu, ' ').trim().replace(/^(?:CHF|kr|zł|R)\s*/i, '').replace(/\s*(?:CHF|kr|zł)$/i, '').trim();
+  const s = t.replace(/[\s\u00a0\u202f'’]+/g, '_');
+  if (!/^[\d.,_]+$/.test(s)) return null;
+  const dots = s.split('.').length - 1;
+  const commas = s.split(',').length - 1;
+  let mark = null;
+  if (dots && commas) mark = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+  else if (dots + commas === 1) {
+    const only = dots ? '.' : ',';
+    const i = s.indexOf(only);
+    const thousands = only === moneyStyle(DEFAULT_CURRENCY, locale).group && /^\d{3}$/.test(s.slice(i + 1)) && /^[1-9]/.test(s.slice(0, i));
+    mark = thousands ? null : only;
+  }
+  const at = mark ? s.lastIndexOf(mark) : s.length;
+  const whole = s.slice(0, at);
+  const frac = mark ? s.slice(at + 1) : '';
+  if (!/^\d*$/.test(frac)) return null;
+  const grouped = /[.,_]/.test(whole);
+  if (grouped && !/^\d{1,3}(?:[.,_]\d{3})+$/.test(whole) && !/^\d{1,2}(?:[,_]\d{2})*[,_]\d{3}$/.test(whole)) return null;
+  const digits = whole.replace(/[.,_]/g, '');
+  if (digits === '' && frac === '') return null;
+  const f = (frac + '000').slice(0, 3);
+  const cents = Number(digits || '0') * 100 + Number(f.slice(0, 2)) + (Number(f[2]) >= 5 ? 1 : 0);
   return Number.isSafeInteger(cents) ? cents : null;
+}
+
+// A new install starts with the currency of the phone's region, if it's on the list.
+const EURO = new Set('AT BE BG CY DE EE ES FI FR GR HR IE IT LT LU LV MT NL PT SI SK AD MC SM VA ME XK'.split(' '));
+const REGION_CURRENCY = { US: 'USD', CA: 'CAD', AU: 'AUD', NZ: 'NZD', SG: 'SGD', HK: 'HKD', MX: 'MXN', BR: 'BRL', GB: 'GBP', CH: 'CHF', LI: 'CHF', SE: 'SEK', NO: 'NOK', DK: 'DKK', PL: 'PLN', IN: 'INR', ZA: 'ZAR' };
+export function currencyForRegion(locale) {
+  try {
+    const region = new Intl.Locale(locale).maximize().region;
+    return EURO.has(region) ? 'EUR' : (REGION_CURRENCY[region] ?? DEFAULT_CURRENCY);
+  } catch {
+    return DEFAULT_CURRENCY;
+  }
 }
 
 // How many decimal places the meter can show: cents, or finer for faster-moving digits.
 export const DECIMAL_CHOICES = [2, 3, 4, 5];
 export const DEFAULT_DECIMALS = 4;
-
-// units are whole 10^-decimals dollars: formatAmount(2187, 5) → "$0.02187".
-export function formatAmount(units, decimals = 2) {
-  const scale = 10 ** decimals;
-  const dollars = Math.floor(units / scale).toLocaleString('en-US');
-  return `$${dollars}.${String(units % scale).padStart(decimals, '0')}`;
-}
-
-export const formatMoney = (cents) => formatAmount(cents, 2);
 
 // Earnings at the given precision, rounded down, so 2 places equals status.cents.
 // The parts (the pay rate's time, then any overtime) are added as exact fractions
@@ -124,7 +259,7 @@ export function buildSchedule(schedule) {
 export function validateConfig(config) {
   const format = FORMATS[config?.format];
   if (!format) return 'Pick a pay format.';
-  if (!Number.isSafeInteger(config.amountCents) || config.amountCents <= 0) return 'Enter an amount above $0.';
+  if (!Number.isSafeInteger(config.amountCents) || config.amountCents <= 0) return 'Enter an amount above 0.';
   if (config.mode === 'scheduled') {
     const built = buildSchedule(config.schedule);
     if (built.error) return built.error;
@@ -137,7 +272,7 @@ export function validateConfig(config) {
     if (!Number.isSafeInteger(x?.amountCents) || x.amountCents <= 0) return x?.label ? `Add an amount for ${x.label}.` : `Extra ${i + 1} needs an amount.`;
   }
   if (config.overtime?.on && !(Number.isSafeInteger(config.overtime.amountCents) && config.overtime.amountCents > 0)) {
-    return 'Enter an overtime rate above $0.';
+    return 'Enter an overtime rate above 0.';
   }
   return null;
 }

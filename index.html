@@ -224,15 +224,15 @@
         <div class="chips" id="f-format"></div>
       </fieldset>
 
-      <label class="field">
-        <span class="label">Pay</span>
+      <div class="field">
+        <label class="label" for="f-amount">Pay</label>
         <span class="money-input">
-          <span class="prefix">$</span>
+          <span class="prefix cur-pick"><span class="cur" aria-hidden="true">$</span><span class="caret" aria-hidden="true">▾</span><select id="f-currency" aria-label="Currency"></select></span>
           <input id="f-amount" type="text" inputmode="decimal" placeholder="210">
           <span class="unit" id="f-unit">per service</span>
         </span>
         <span class="hint" id="format-note" hidden></span>
-      </label>
+      </div>
 
       <div class="field">
         <span class="label">Extras <em>optional</em></span>
@@ -279,7 +279,7 @@
       <div class="field" id="ot-field">
         <label class="switch-row"><span>Overtime <em>after the planned end</em></span><input type="checkbox" class="switch" id="f-ot-on" role="switch"></label>
         <label class="money-input ot-rate" id="ot-rate-wrap" hidden>
-          <span class="prefix">$</span>
+          <span class="prefix cur">$</span>
           <input id="f-ot-rate" type="text" inputmode="decimal" placeholder="90" aria-label="Overtime pay per hour">
           <span class="unit">per hour</span>
         </label>
@@ -377,7 +377,7 @@
   <template id="extra-row">
     <li class="extra-row">
       <input type="text" class="x-label" maxlength="30" placeholder="Parking" aria-label="What the extra is for">
-      <span class="money-input"><span class="prefix">$</span><input type="text" class="x-amount" inputmode="decimal" placeholder="15" aria-label="Extra amount"></span>
+      <span class="money-input"><span class="prefix cur">$</span><input type="text" class="x-amount" inputmode="decimal" placeholder="15" aria-label="Extra amount"></span>
       <button type="button" class="remove" aria-label="Remove extra">&times;</button>
     </li>
   </template>
